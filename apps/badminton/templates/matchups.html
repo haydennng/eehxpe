@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}Record Match - Badminton Manager{% endblock %}
+{% block page_id %}matchups{% endblock %}
+
+{% block content %}
+<div class="section-grid">
+    <!-- Left Column: Session Info + Match Entry -->
+    <div class="left-column">
+        <!-- Session Info Header -->
+        <div id="sessionInfo" class="session-info-header">
+            <div class="session-info-content">
+                <span class="session-date" id="sessionDate">Loading...</span>
+                <span class="session-divider">•</span>
+                <span class="session-games">Games: <strong id="todayGamesCount">0</strong></span>
+            </div>
+        </div>
+        
+        <!-- Match Entry Form -->
+        <div class="card card--entry">
+        <div class="card-header">Match Entry</div>
+        
+        <!-- Player Selection -->
+        <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <label class="form-label" style="margin-bottom: 0;">Players</label>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button type="button" id="btn-clear-selected" class="btn btn-secondary btn-small" disabled title="Clear selected players">Clear</button>
+                    <button type="button" id="btn-cycle-recommendation" class="btn btn-secondary btn-small" disabled title="Pick recommended players or cycle through recommendations" style="padding: 0.5rem 0.75rem;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 2v6h-6"></path>
+                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                            <path d="M3 22v-6h6"></path>
+                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="recommendation-explanation" class="text-muted" style="font-size: 0.875rem; margin-bottom: 0.5rem; min-height: 0.875rem;"></div>
+            <div id="playerToggles" class="player-toggle-grid">
+                <div class="table-empty">Loading players...</div>
+            </div>
+        </div>
+        
+        <!-- Teams & Bet Stacked Layout -->
+        <div class="teams-bet-row" id="teamPreview">
+            <!-- Courts Selector Tabs -->
+            <nav class="courts-tabs" role="tablist" aria-label="Courts selector">
+                <button type="button" 
+                        class="courts-tab" 
+                        id="courts-tab-1" 
+                        data-courts="1" 
+                        role="tab" 
+                        aria-controls="courts-container" 
+                        aria-selected="false">
+                    1
+                </button>
+                <button type="button" 
+                        class="courts-tab is-active" 
+                        id="courts-tab-2" 
+                        data-courts="2" 
+                        role="tab" 
+                        aria-controls="courts-container" 
+                        aria-selected="true">
+                    2
+                </button>
+                <button type="button" 
+                        class="courts-tab" 
+                        id="courts-tab-3" 
+                        data-courts="3" 
+                        role="tab" 
+                        aria-controls="courts-container" 
+                        aria-selected="false">
+                    3
+                </button>
+            </nav>
+            
+            <!-- Courts Container -->
+            <div id="courts-container">
+                <!-- Court 1 Row -->
+                <div class="court-row" id="court-1-row" data-court="1">
+                    <span class="court-number" id="court-1-number" aria-hidden="true" hidden>1</span>
+                    <div class="team team-a" data-team="a">
+                        <div class="team-names" id="court1-teamA"></div>
+                        <input type="number" class="score-input score-a" id="court1-score-a" min="0" placeholder="0" aria-label="Court 1 Team A Score">
+                    </div>
+                    <img class="vs-icon" src="/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                    <div class="team team-b" data-team="b">
+                        <input type="number" class="score-input score-b" id="court1-score-b" min="0" placeholder="0" aria-label="Court 1 Team B Score">
+                        <div class="team-names" id="court1-teamB"></div>
+                    </div>
+                </div>
+                
+                <!-- Court 2 Row -->
+                <div class="court-row" id="court-2-row" data-court="2">
+                    <span class="court-number" id="court-2-number" aria-hidden="true">2</span>
+                    <div class="team team-a" data-team="a">
+                        <div class="team-names" id="court2-teamA"></div>
+                        <input type="number" class="score-input score-a" id="court2-score-a" min="0" placeholder="0" aria-label="Court 2 Team A Score">
+                    </div>
+                    <img class="vs-icon" src="/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                    <div class="team team-b" data-team="b">
+                        <input type="number" class="score-input score-b" id="court2-score-b" min="0" placeholder="0" aria-label="Court 2 Team B Score">
+                        <div class="team-names" id="court2-teamB"></div>
+                    </div>
+                </div>
+                
+                <!-- Court 3 Row -->
+                <div class="court-row court-row--hidden" id="court-3-row" data-court="3">
+                    <span class="court-number" id="court-3-number" aria-hidden="true">3</span>
+                    <div class="team team-a" data-team="a">
+                        <div class="team-names" id="court3-teamA"></div>
+                        <input type="number" class="score-input score-a" id="court3-score-a" min="0" placeholder="0" aria-label="Court 3 Team A Score">
+                    </div>
+                    <img class="vs-icon" src="/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                    <div class="team team-b" data-team="b">
+                        <input type="number" class="score-input score-b" id="court3-score-b" min="0" placeholder="0" aria-label="Court 3 Team B Score">
+                        <div class="team-names" id="court3-teamB"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Bet Amount Selection (Below All Courts) -->
+            <div id="bet-row" class="bet-row">
+                <div id="betButtons" class="bet-button-group">
+                    <button type="button" class="btn-bet" data-value="0">$0</button>
+                    <button type="button" class="btn-bet" data-value="1">$1</button>
+                    <button type="button" class="btn-bet" data-value="2">$2</button>
+                    <button type="button" class="btn-bet" data-value="3">$3</button>
+                    <button type="button" class="btn-bet" data-value="4">$4</button>
+                    <button type="button" class="btn-bet" data-value="5">$5</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Submit Button -->
+        <button id="recordMatchBtn" class="btn btn-primary" disabled onclick="console.log('Button clicked via onclick')">Record Match</button>
+        </div>
+    </div>
+    
+    <!-- Match Data Carousel Card -->
+            <div class="card card--history">
+                <div class="card-header">
+                <nav class="card-header-tabs" role="tablist" aria-label="Match data tabs">
+                        <button type="button" 
+                                class="tab-item active" 
+                                id="tab-match-history" 
+                                data-tab-target="match-history" 
+                                role="tab" 
+                                aria-controls="pane-match-history" 
+                                aria-selected="true">
+                            History
+                        </button>
+                        <button type="button" 
+                                class="tab-item" 
+                                id="tab-player-earnings" 
+                                data-tab-target="player-earnings" 
+                                role="tab" 
+                                aria-controls="pane-player-earnings" 
+                                aria-selected="false">
+                            Earnings
+                        </button>
+                        <button type="button" 
+                                class="tab-item" 
+                                id="tab-partnership-stats" 
+                                data-tab-target="partnership-stats" 
+                                role="tab" 
+                                aria-controls="pane-partnership-stats" 
+                                aria-selected="false">
+                            Stats
+                        </button>
+                    </nav>
+                </div>
+                <div class="carousel-card-body">
+                    <!-- Pane 1: Match History (default visible) -->
+                    <section id="pane-match-history" 
+                             class="carousel-pane is-active" 
+                             role="tabpanel" 
+                             aria-labelledby="tab-match-history">
+                        <div class="table-scroll">
+                            <table class="table table-compact match-history">
+                                <thead>
+                                    <tr>
+                                        <th class="col-number" style="width: 60px;">#</th>
+                                        <th class="col-team-a">Team A</th>
+                                        <th class="col-score" style="width: 80px; text-align: center;">Score</th>
+                                        <th class="col-team-b">Team B</th>
+                                        <th class="col-bet" style="width: 80px; text-align: right;">Bet</th>
+                                        <th class="col-action" style="width: 80px; text-align: center;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="matchHistoryBody">
+                                    <tr>
+                                        <td colspan="6" class="table-empty">No matches in today's session yet</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <!-- Pane 2: Player Earnings (hidden by default) -->
+                    <section id="pane-player-earnings" 
+                             class="carousel-pane" 
+                             role="tabpanel" 
+                             aria-labelledby="tab-player-earnings" 
+                             hidden>
+                        <div class="session-earnings-mini" id="playerEarningsList">
+                            <div style="color: var(--text-muted); font-size: 0.875rem;">Loading...</div>
+                        </div>
+                    </section>
+
+                    <!-- Pane 3: Session Statistics (hidden by default) -->
+                    <section id="pane-partnership-stats" 
+                             class="carousel-pane" 
+                             role="tabpanel" 
+                             aria-labelledby="tab-partnership-stats" 
+                             hidden>
+                        <div class="stats-container">
+                            <!-- Player Win Rates -->
+                            <div class="stats-table-wrap">
+                                <h4 class="stats-table-heading">Player Win Rates</h4>
+                                <table class="stats-table compact stats-table-barchart">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th style="text-align: center; width: 40px;">G</th>
+                                            <th style="min-width: 200px;">Win Rate</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="playerStatsBody">
+                                        <tr>
+                                            <td colspan="3" class="table-empty">No games in this session yet</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- Partnership Win Rates -->
+                            <div class="stats-table-wrap stats-table-wrap--scrollable">
+                                <h4 class="stats-table-heading">Partnership Win Rates</h4>
+                                <div class="stats-table-scroll">
+                                <table class="stats-table compact">
+                                    <thead>
+                                        <tr>
+                                            <th>Partnership</th>
+                                            <th style="text-align: right;">G</th>
+                                            <th style="text-align: right;">W</th>
+                                            <th style="text-align: right;">L</th>
+                                            <th style="text-align: right;">Win %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="partnershipStatsBody">
+                                        <tr>
+                                            <td colspan="5" class="table-empty">No partnerships recorded yet</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+</div>
+{% endblock %}

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0b8457">
+    <meta name="description" content="Manage badminton matchups, track scores, and view player statistics">
+    <title>{% block title %}Badminton Matchup Manager{% endblock %}</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    
+    <!-- iOS PWA Support -->
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Badminton">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body data-page="{% block page_id %}{% endblock %}">
+    <!-- Mobile hamburger (visible only on mobile via CSS) -->
+    <button id="mobile-menu-button"
+            class="mobile-hamburger"
+            aria-label="Open menu"
+            aria-controls="mobile-sidenav"
+            aria-expanded="false">
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+    </button>
+
+    <!-- Mobile dropdown navigation (slides down from hamburger) -->
+    <nav id="mobile-sidenav" class="mobile-sidenav" aria-hidden="true">
+        <ul class="mobile-nav-list">
+            <li class="mobile-nav-item">
+                <a class="mobile-nav-link" href="/" aria-label="Dashboard">
+                    <img src="{{ url_for('static', filename='images/dashboard.svg') }}" alt="" class="mobile-nav-icon">
+                </a>
+            </li>
+            <li class="mobile-nav-item">
+                <a class="mobile-nav-link" href="/players" aria-label="Players">
+                    <img src="{{ url_for('static', filename='images/players.svg') }}" alt="" class="mobile-nav-icon">
+                </a>
+            </li>
+            <li class="mobile-nav-item">
+                <a class="mobile-nav-link mobile-nav-link--matchups" href="/matchups" aria-label="Matchups">
+                    <img src="{{ url_for('static', filename='images/matchups.svg') }}" alt="" class="mobile-nav-icon mobile-nav-icon--gradient">
+                </a>
+            </li>
+            <li class="mobile-nav-item">
+                <a class="mobile-nav-link" href="/history" aria-label="History">
+                    <img src="{{ url_for('static', filename='images/history.svg') }}" alt="" class="mobile-nav-icon">
+                </a>
+            </li>
+            <li class="mobile-nav-item">
+                <a class="mobile-nav-link" href="/stats" aria-label="Stats">
+                    <img src="{{ url_for('static', filename='images/stats.svg') }}" alt="" class="mobile-nav-icon">
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Overlay/backdrop to close nav on outside click -->
+    <div id="nav-overlay" class="nav-overlay"></div>
+
+    <!-- Navigation -->
+    <nav class="navbar desktop-navbar">
+        <div class="nav-container">
+            <a href="/" class="nav-brand">🏸 Badminton Manager</a>
+            <ul class="nav-links">
+                <li><a href="/" {% if request.path == '/' %}class="active"{% endif %}>Dashboard</a></li>
+                <li><a href="/players" {% if request.path == '/players' %}class="active"{% endif %}>Players</a></li>
+                <li><a href="/matchups" {% if request.path == '/matchups' %}class="active"{% endif %}>Matchups</a></li>
+                <li><a href="/history" {% if request.path == '/history' %}class="active"{% endif %}>History</a></li>
+                <li><a href="/stats" {% if request.path == '/stats' %}class="active"{% endif %}>Stats</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- JavaScript -->
+    {% block extra_js %}{% endblock %}
+    {% block main_js %}
+    <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
+    {% endblock %}
+    
+    <!-- PWA Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/sw.js')
+                    .then(reg => console.log('[PWA] Service worker registered:', reg.scope))
+                    .catch(err => console.error('[PWA] Service worker registration failed:', err));
+            });
+        }
+        
+        // PWA Install Prompt (Android/Chrome)
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('[PWA] Install prompt available');
+            e.preventDefault();
+            deferredPrompt = e;
+            
+            // Show install button if it exists on the page
+            const installBtn = document.getElementById('pwaInstallBtn');
+            if (installBtn) {
+                installBtn.style.display = 'block';
+                installBtn.addEventListener('click', async () => {
+                    if (!deferredPrompt) return;
+                    
+                    installBtn.disabled = true;
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    console.log('[PWA] User choice:', outcome);
+                    deferredPrompt = null;
+                    installBtn.style.display = 'none';
+                });
+            }
+        });
+        
+        // Track when app is installed
+        window.addEventListener('appinstalled', () => {
+            console.log('[PWA] App installed successfully');
+            deferredPrompt = null;
+        });
+    </script>
+</body>
+</html>

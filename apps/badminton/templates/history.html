@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Match History - Badminton Manager{% endblock %}
+{% block page_id %}history{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>History</h1>
+    <p>View all badminton sessions - click on a session to view matches</p>
+</div>
+
+<div class="card">
+    <div class="card-header">Sessions</div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th style="width: 150px;">Date</th>
+                    <th>Players</th>
+                    <th style="width: 100px; text-align: center;">Games</th>
+                    <th style="width: 120px; text-align: center;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="sessionsTableBody">
+                <tr>
+                    <td colspan="4" class="table-empty">No sessions recorded yet</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

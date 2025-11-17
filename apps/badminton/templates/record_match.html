@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Record Match - Badminton Manager{% endblock %}
+{% block page_id %}record{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Record Match Result</h1>
+    <p>Enter the results of a completed match</p>
+</div>
+
+<div class="card">
+    <div class="card-header">Match Result Form</div>
+    <form id="recordMatchForm">
+        <div class="form-group">
+            <label for="gameNumber" class="form-label">Select Game</label>
+            <select id="gameNumber" class="form-select" required>
+                <option value="">-- Select a game --</option>
+            </select>
+        </div>
+
+        <div id="teamInfo" style="display: none;" class="mb-3">
+            <div class="flex-between mb-2">
+                <div style="flex: 1;">
+                    <strong>Team A:</strong> <span id="teamAPlayers"></span>
+                </div>
+                <div style="flex: 1; text-align: right;">
+                    <strong>Team B:</strong> <span id="teamBPlayers"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="team1Score" class="form-label">Team A Score</label>
+                <input type="number" id="team1Score" class="form-input" min="0" required>
+            </div>
+            <div class="form-group">
+                <label for="team2Score" class="form-label">Team B Score</label>
+                <input type="number" id="team2Score" class="form-input" min="0" required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="gameValue" class="form-label">Game Value (optional override)</label>
+            <input type="number" id="gameValue" class="form-input" step="0.01" min="0" placeholder="Leave blank to use automatic calculation">
+        </div>
+
+        <button type="submit" class="btn btn-primary">Record Match</button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-header">Available Matches</div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th style="width: 80px;">Game #</th>
+                    <th>Team A</th>
+                    <th>Team B</th>
+                    <th style="width: 100px; text-align: right;">Value</th>
+                </tr>
+            </thead>
+            <tbody id="availableMatchesBody">
+                <tr>
+                    <td colspan="4" class="table-empty">No matchups available</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

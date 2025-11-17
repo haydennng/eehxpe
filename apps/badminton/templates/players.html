@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Players - Badminton Manager{% endblock %}
+{% block page_id %}players{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Players</h1>
+    <p>Manage players for your badminton session</p>
+</div>
+
+<!-- Add Player -->
+<div class="card">
+    <div class="card-header">Add Player</div>
+    <form id="addPlayerForm">
+        <div class="flex gap-2">
+            <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                <input type="text" id="playerName" class="form-input" placeholder="Enter player name" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Add Player</button>
+        </div>
+    </form>
+</div>
+
+<!-- Players List -->
+<div class="card">
+    <div class="card-header">Current Players</div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Player Name</th>
+                    <th style="width: 100px; text-align: center;">MMR</th>
+                    <th style="width: 150px; text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="playersTableBody">
+                <tr>
+                    <td colspan="3" class="table-empty">No players added yet</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

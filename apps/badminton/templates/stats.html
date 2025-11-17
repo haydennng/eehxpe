@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Player Stats - Badminton Manager{% endblock %}
+{% block page_id %}stats{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Player Statistics</h1>
+    <p>Comprehensive performance analysis across all sessions</p>
+</div>
+
+<section class="stats-sections">
+    <!-- Player Section -->
+    <div class="chart-section" id="section-player">
+        <h2>Player</h2>
+        <div class="stats-two-col">
+            <!-- Win Rates (Left) -->
+            <div class="chart-card">
+                <h3>Win Rates</h3>
+                <div id="player-winrates-list" class="winrates-list">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+            
+            <!-- Earnings (Right) -->
+            <div class="chart-card">
+                <h3>Earnings</h3>
+                <div id="player-earnings-list" class="earnings-list">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team Section -->
+    <div class="chart-section" id="section-team">
+        <h2>Team</h2>
+        <p class="section-subtitle">Partnerships ranked by win rate • Win/loss ratios shown (minimum of 4 games)</p>
+        <div class="chart-card">
+            <div id="team-partnerships-list" class="partnerships-list">
+                <!-- Populated by JS -->
+            </div>
+            <button type="button" id="team-partnerships-more" class="show-more-btn" aria-label="Show more partnerships">
+                <span aria-hidden="true">▾</span> Show More
+            </button>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>console.log('[TEST] extra_js block is rendering!');</script>
+<!-- Chart.js - local copy, load synchronously -->
+<script src="{{ url_for('static', filename='js/chart.min.js') }}"></script>
+<script>
+console.log('[DEBUG] Chart.js script tag executed');
+console.log('[DEBUG] Chart type:', typeof Chart);
+if (typeof Chart !== 'undefined') {
+    console.log('[DEBUG] Chart.js SUCCESS! Version:', Chart.version);
+} else {
+    console.error('[DEBUG] Chart.js FAILED TO LOAD!');
+}
+</script>
+{% endblock %}
+
+{% block main_js %}
+<!-- Load main.js after Chart.js is ready -->
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% endblock %}

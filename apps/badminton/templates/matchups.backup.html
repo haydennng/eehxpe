@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Record Match - Badminton Manager{% endblock %}
+{% block page_id %}matchups{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Record Match</h1>
+    <p>Select players, set bet amount, and record match results</p>
+</div>
+
+<!-- 2x2 Grid Layout -->
+<div class="matchup-grid">
+    <!-- Row 1, Col 1: Match Entry Form -->
+    <div class="card">
+        <div class="card-header">Match Entry</div>
+        
+        <!-- Player Selection -->
+        <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <label class="form-label" style="margin-bottom: 0;">Select Players (4 required)</label>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button type="button" id="btn-clear-selected" class="btn btn-secondary btn-small" disabled title="Clear selected players">Clear</button>
+                    <button type="button" id="btn-cycle-recommendation" class="btn btn-secondary btn-small" disabled title="Next recommendation" style="padding: 0.5rem 0.75rem;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 2v6h-6"></path>
+                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                            <path d="M3 22v-6h6"></path>
+                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+                        </svg>
+                    </button>
+                    <button type="button" id="btn-set-recommended" class="btn btn-secondary btn-small" disabled>Recommended</button>
+                </div>
+            </div>
+            <div id="recommendation-explanation" class="text-muted" style="font-size: 0.875rem; margin-bottom: 0.75rem; min-height: 1.2rem;"></div>
+            <div id="playerToggles" class="player-toggle-grid">
+                <div class="table-empty">Loading players...</div>
+            </div>
+        </div>
+        
+        <!-- Team Preview -->
+        <div id="teamPreview" class="team-preview" style="display: none;">
+            <div class="team-preview-section">
+                <strong>Team A:</strong> <span id="teamAPreview">-</span>
+            </div>
+            <div class="team-preview-section">
+                <strong>Team B:</strong> <span id="teamBPreview">-</span>
+            </div>
+        </div>
+        
+        <!-- Bet Amount Selection -->
+        <div class="form-group">
+            <label class="form-label">Bet Amount</label>
+            <div id="betButtons" class="bet-button-group">
+                <button type="button" class="btn-bet" data-value="0">$0</button>
+                <button type="button" class="btn-bet" data-value="1">$1</button>
+                <button type="button" class="btn-bet" data-value="2">$2</button>
+                <button type="button" class="btn-bet" data-value="3">$3</button>
+                <button type="button" class="btn-bet" data-value="4">$4</button>
+                <button type="button" class="btn-bet" data-value="5">$5</button>
+            </div>
+        </div>
+        
+        <!-- Score Inputs -->
+        <div class="form-row">
+            <div class="form-group">
+                <label for="team1Score" class="form-label">Team A Score</label>
+                <input type="number" id="team1Score" class="form-input" min="0" placeholder="0">
+            </div>
+            <div class="form-group">
+                <label for="team2Score" class="form-label">Team B Score</label>
+                <input type="number" id="team2Score" class="form-input" min="0" placeholder="0">
+            </div>
+        </div>
+        
+        <!-- Submit Button -->
+        <button id="recordMatchBtn" class="btn btn-primary" disabled onclick="console.log('Button clicked via onclick')">Record Match</button>
+        
+        <!-- Debug Status -->
+        <div id="debugStatus" style="margin-top: 1rem; padding: 0.5rem; background: rgba(255,255,255,0.1); border-radius: 4px; font-size: 0.85rem;">
+            <strong>Debug:</strong>
+            <span id="debugPlayers">Players: 0/4</span> | 
+            <span id="debugBet">Bet: Not selected</span> | 
+            <span id="debugScores">Scores: No</span> | 
+            <span id="debugButton">Button: Disabled</span>
+        </div>
+    </div>
+    
+    <!-- Row 1, Col 2: Match History -->
+    <div class="card">
+        <div class="card-header">Match History</div>
+        <div class="table-container scrollable-table">
+            <table class="table table-compact">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">#</th>
+                        <th>Team A</th>
+                        <th style="width: 80px; text-align: center;">Score</th>
+                        <th>Team B</th>
+                        <th style="width: 80px; text-align: right;">Bet</th>
+                        <th style="width: 80px; text-align: center;">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="matchHistoryBody">
+                    <tr>
+                        <td colspan="6" class="table-empty">No matches in today's session yet</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Row 2, Col 1: Partnership Statistics -->
+    <div class="card">
+        <div class="card-header">Partnership Statistics</div>
+        <div class="table-container scrollable-table">
+            <table class="table table-compact">
+                <thead>
+                    <tr>
+                        <th>Partnership</th>
+                        <th style="width: 120px; text-align: center;">Games Played</th>
+                    </tr>
+                </thead>
+                <tbody id="partnershipTableBody">
+                    <tr>
+                        <td colspan="2" class="table-empty">No partnerships recorded yet</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Row 2, Col 2: Player Earnings -->
+    <div class="card">
+        <div class="card-header">Player Earnings</div>
+        <div class="session-earnings-mini" id="playerEarningsList">
+            <div style="color: var(--text-muted); font-size: 0.875rem;">Loading...</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
