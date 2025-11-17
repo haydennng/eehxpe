@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Production data and secrets (NEVER commit these!)
+data/
+logs/
+backups/
+.env.production
+.env.local
+secrets/
+*.log
+
+# Deployment tracking (local only)
+.last_deployed_commit
+.requirements.sha1
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# GitHub Actions runner (if self-hosted)
+actions-runner/
+_work/

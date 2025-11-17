@@ -1,0 +1,32 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  deploy:
+    name: Deploy to Windows PC
+    runs-on: self-hosted
+    
+    steps:
+      - name: Deploy via deployment script
+        shell: pwsh
+        run: |
+          Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host "Starting automatic deployment..." -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
+          
+          Set-Location C:\Users\Hayde\eehxpe
+          
+          # Execute deployment script
+          & .\scripts\deploy.ps1
+          
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "`n✓ Deployment successful!" -ForegroundColor Green
+            exit 0
+          } else {
+            Write-Host "`n✗ Deployment failed!" -ForegroundColor Red
+            exit 1
+          }
