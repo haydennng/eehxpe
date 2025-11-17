@@ -34,27 +34,27 @@
     <nav id="mobile-sidenav" class="mobile-sidenav" aria-hidden="true">
         <ul class="mobile-nav-list">
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="/" aria-label="Dashboard">
+                <a class="mobile-nav-link" href="{{ url_for('index') }}" aria-label="Dashboard">
                     <img src="{{ url_for('static', filename='images/dashboard.svg') }}" alt="" class="mobile-nav-icon">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="/players" aria-label="Players">
+                <a class="mobile-nav-link" href="{{ url_for('players') }}" aria-label="Players">
                     <img src="{{ url_for('static', filename='images/players.svg') }}" alt="" class="mobile-nav-icon">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link mobile-nav-link--matchups" href="/matchups" aria-label="Matchups">
+                <a class="mobile-nav-link mobile-nav-link--matchups" href="{{ url_for('matchups') }}" aria-label="Matchups">
                     <img src="{{ url_for('static', filename='images/matchups.svg') }}" alt="" class="mobile-nav-icon mobile-nav-icon--gradient">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="/history" aria-label="History">
+                <a class="mobile-nav-link" href="{{ url_for('history') }}" aria-label="History">
                     <img src="{{ url_for('static', filename='images/history.svg') }}" alt="" class="mobile-nav-icon">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="/stats" aria-label="Stats">
+                <a class="mobile-nav-link" href="{{ url_for('stats') }}" aria-label="Stats">
                     <img src="{{ url_for('static', filename='images/stats.svg') }}" alt="" class="mobile-nav-icon">
                 </a>
             </li>
@@ -67,13 +67,13 @@
     <!-- Navigation -->
     <nav class="navbar desktop-navbar">
         <div class="nav-container">
-            <a href="/" class="nav-brand">🏸 Badminton Manager</a>
+            <a href="{{ url_for('index') }}" class="nav-brand">🏸 Badminton Manager</a>
             <ul class="nav-links">
-                <li><a href="/" {% if request.path == '/' %}class="active"{% endif %}>Dashboard</a></li>
-                <li><a href="/players" {% if request.path == '/players' %}class="active"{% endif %}>Players</a></li>
-                <li><a href="/matchups" {% if request.path == '/matchups' %}class="active"{% endif %}>Matchups</a></li>
-                <li><a href="/history" {% if request.path == '/history' %}class="active"{% endif %}>History</a></li>
-                <li><a href="/stats" {% if request.path == '/stats' %}class="active"{% endif %}>Stats</a></li>
+                <li><a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}class="active"{% endif %}>Dashboard</a></li>
+                <li><a href="{{ url_for('players') }}" {% if request.endpoint == 'players' %}class="active"{% endif %}>Players</a></li>
+                <li><a href="{{ url_for('matchups') }}" {% if request.endpoint == 'matchups' %}class="active"{% endif %}>Matchups</a></li>
+                <li><a href="{{ url_for('history') }}" {% if request.endpoint == 'history' %}class="active"{% endif %}>History</a></li>
+                <li><a href="{{ url_for('stats') }}" {% if request.endpoint == 'stats' %}class="active"{% endif %}>Stats</a></li>
             </ul>
         </div>
     </nav>
@@ -96,7 +96,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js')
+                navigator.serviceWorker.register('{{ url_for('static', filename='sw.js') }}')
                     .then(reg => console.log('[PWA] Service worker registered:', reg.scope))
                     .catch(err => console.error('[PWA] Service worker registration failed:', err));
             });

@@ -172,15 +172,15 @@ async function initDashboard() {
 async function loadDashboardStats() {
     try {
         // Get session info
-        const session = await api('/api/session');
+        const session = await api('./api/session');
         qs('#playerCount').textContent = session.player_count;
         
         // Get match count
-        const matches = await api('/api/matches');
+        const matches = await api('./api/matches');
         qs('#matchCount').textContent = matches.length;
         
         // Get sessions count
-        const sessions = await api('/api/sessions');
+        const sessions = await api('./api/sessions');
         qs('#sessionsCount').textContent = sessions.length;
         
         // Load quick recap
@@ -204,9 +204,9 @@ async function loadMonthlyEarnings() {
         
         // Get earnings data, players data, and monthly matches for MMR calculation
         const [earnings, players, stats] = await Promise.all([
-            api('/api/earnings/monthly'),
-            api('/api/players'),
-            api('/api/stats')
+            api('./api/earnings/monthly'),
+            api('./api/players'),
+            api('./api/stats')
         ]);
         
         const container = qs('#monthlyEarningsList');
@@ -445,7 +445,7 @@ async function initPlayers() {
         }
         
         try {
-            await api('/api/players', {
+            await api('./api/players', {
                 method: 'POST',
                 body: JSON.stringify({ name })
             });
@@ -461,7 +461,7 @@ async function initPlayers() {
 
 async function loadPlayers() {
     try {
-        const players = await api('/api/players');
+        const players = await api('./api/players');
         const tbody = qs('#playersTableBody');
         
         if (players.length === 0) {
@@ -540,7 +540,7 @@ async function initMatchups() {
         
         // Load current session first
         console.log('Loading current session...');
-        currentSession = await api('/api/sessions/current');
+        currentSession = await api('./api/sessions/current');
         console.log('Current session loaded:', currentSession);
         
         console.log('Updating session display...');
@@ -697,7 +697,7 @@ async function initMatchups() {
 async function loadPlayersForMatchups() {
     try {
         console.log('loadPlayersForMatchups: Fetching players...');
-        allPlayers = await api('/api/players');
+        allPlayers = await api('./api/players');
         console.log('loadPlayersForMatchups: Got players:', allPlayers);
         
         // Count active players for dual-court mode
@@ -1152,7 +1152,7 @@ function updateTeamColors() {
 
 async function loadRecommendations() {
     try {
-        const response = await api('/api/recommendations');
+        const response = await api('./api/recommendations');
         
         // Check if dual-court mode
         if (response.dual_court) {
@@ -1363,7 +1363,7 @@ async function cycleRecommendation() {
             // Don't exclude players in dual-court mode, just fetch a fresh recommendation
             // The backend will generate a different team arrangement
             console.log('Fetching new dual-court recommendations');
-            const response = await api('/api/recommendations');
+            const response = await api('./api/recommendations');
             console.log('Got response:', response);
             
             // Update state with new recommendations
@@ -1689,7 +1689,7 @@ async function handleRecordMatch() {
             
             // Submit Court 1 match
             console.log('Submitting Court 1 match...');
-            const result1 = await api('/api/matches', {
+            const result1 = await api('./api/matches', {
                 method: 'POST',
                 body: JSON.stringify(court1Payload)
             });
@@ -1698,7 +1698,7 @@ async function handleRecordMatch() {
             // Submit Court 2 match
             console.log('Submitting Court 2 match...');
             try {
-                const result2 = await api('/api/matches', {
+                const result2 = await api('./api/matches', {
                     method: 'POST',
                     body: JSON.stringify(court2Payload)
                 });
@@ -1729,7 +1729,7 @@ async function handleRecordMatch() {
             console.log('Payload:', payload);
             console.log('Calling API...');
             
-            const result = await api('/api/matches', {
+            const result = await api('./api/matches', {
                 method: 'POST',
                 body: JSON.stringify(payload)
             });
@@ -1852,7 +1852,7 @@ function updateSessionDisplay() {
 async function loadMatchHistory() {
     try {
         // Refresh current session data
-        currentSession = await api('/api/sessions/current');
+        currentSession = await api('./api/sessions/current');
         
         // Get matches for current session
         const sessionData = await api(`/api/sessions/${currentSession.session_id}`);
@@ -2165,7 +2165,7 @@ async function initHistory() {
 
 async function loadSessions() {
     try {
-        const sessions = await api('/api/sessions');
+        const sessions = await api('./api/sessions');
         const tbody = qs('#sessionsTableBody');
         
         if (sessions.length === 0) {
@@ -2804,9 +2804,9 @@ async function initStats() {
 async function loadStats() {
     try {
         const [stats, earnings, partnerships] = await Promise.all([
-            api('/api/stats'),
-            api('/api/earnings'),
-            api('/api/partnerships')
+            api('./api/stats'),
+            api('./api/earnings'),
+            api('./api/partnerships')
         ]);
         
         const shaped = shapeStatsData(stats, earnings, partnerships);
