@@ -366,7 +366,7 @@ async function loadQuickRecap(sessions) {
         
         // Fetch earnings data for all 3 sessions
         const sessionDataPromises = last3Sessions.map(async session => {
-            const earningsData = await api(`/api/sessions/${session.session_id}/earnings`);
+            const earningsData = await api(`./api/sessions/${session.session_id}/earnings`);
             return {
                 session,
                 players: earningsData.players || []
@@ -503,7 +503,7 @@ async function deletePlayer(name) {
     }
     
     try {
-        await api(`/api/players/${encodeURIComponent(name)}`, {
+        await api(`./api/players/${encodeURIComponent(name)}`, {
             method: 'DELETE'
         });
         
@@ -944,7 +944,7 @@ async function togglePlayerActive(playerName) {
     
     // Persist to backend
     try {
-        await api(`/api/players/${encodeURIComponent(playerName)}/active`, {
+        await api(`./api/players/${encodeURIComponent(playerName)}/active`, {
             method: 'PATCH',
             body: JSON.stringify({ active: newActive })
         });
@@ -1522,6 +1522,58 @@ function setRecommendedMatchup() {
     validateForm();
 }
 
+// ==================== MMR & Win Probability Helpers ====================
+
+// Get a player's MMR from allPlayers array, default to 1500 if missing
+function getPlayerMMR(name) {
+    const entry = allPlayers.find(p => (typeof p === 'object' ? p.name : p) === name);
+    if (entry && typeof entry === 'object' && Number.isFinite(entry.mmr)) {
+        return entry.mmr;
+    }
+    return 1500;
+}
+
+// Calculate team MMR as average of all players' MMRs
+function calcTeamMMR(teamPlayers) {
+    if (!teamPlayers || teamPlayers.length === 0) return 1500;
+    const total = teamPlayers.reduce((sum, name) => sum + getPlayerMMR(name), 0);
+    return total / teamPlayers.length;
+}
+
+// Calculate expected win probability using ELO formula
+function expectedScore(ratingA, ratingB) {
+    return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
+}
+
+// Format probability as percentage string (e.g., "78%")
+function formatPct(prob) {
+    const p = Math.round(prob * 100);
+    return `${p}%`;
+}
+
+// Render team names with win probability percentage
+function renderTeamNamesWithProb(containerEl, players, probOrNull) {
+    // Check if mobile (viewport width <= 768px)
+    const isMobile = window.innerWidth <= 768;
+    
+    // Format team names (existing logic)
+    if (isMobile) {
+        // Mobile: stack names vertically using div elements
+        containerEl.innerHTML = players.map(name => `<div>${escapeHtml(name)}</div>`).join('');
+    } else {
+        // Desktop: join with &
+        containerEl.innerHTML = escapeHtml(players.join(' & '));
+    }
+    
+    // Append win probability if available
+    if (probOrNull != null) {
+        const span = document.createElement('span');
+        span.className = 'win-prob';
+        span.textContent = ' ' + formatPct(probOrNull);
+        containerEl.appendChild(span);
+    }
+}
+
 function updateTeamPreview() {
     // Update team names based on selected players and mode
     const court1TeamA = qs('#court1-teamA');
@@ -1535,32 +1587,36 @@ function updateTeamPreview() {
         return;
     }
     
-    // Check if mobile (viewport width <= 768px)
-    const isMobile = window.innerWidth <= 768;
-    
-    // Helper function to format team names
-    const formatTeamNames = (players) => {
-        if (isMobile) {
-            // Mobile: stack names vertically using div elements
-            return players.map(name => `<div>${escapeHtml(name)}</div>`).join('');
+    // Helper to render a court's teams with win probabilities
+    const assignAndRenderCourt = (offset, teamAEl, teamBEl) => {
+        const teamA = selectedPlayers.slice(offset, offset + 2).filter(Boolean);
+        const teamB = selectedPlayers.slice(offset + 2, offset + 4).filter(Boolean);
+        
+        if (teamA.length > 0 && teamB.length > 0) {
+            // Both teams have players - calculate win probabilities
+            const mmrA = calcTeamMMR(teamA);
+            const mmrB = calcTeamMMR(teamB);
+            const pA = expectedScore(mmrA, mmrB);
+            const pB = 1 - pA;
+            renderTeamNamesWithProb(teamAEl, teamA, pA);
+            renderTeamNamesWithProb(teamBEl, teamB, pB);
+        } else if (teamA.length > 0) {
+            // Only Team A has players
+            renderTeamNamesWithProb(teamAEl, teamA, null);
+            teamBEl.innerHTML = '';
+        } else if (teamB.length > 0) {
+            // Only Team B has players
+            teamAEl.innerHTML = '';
+            renderTeamNamesWithProb(teamBEl, teamB, null);
         } else {
-            // Desktop: join with &
-            return escapeHtml(players.join(' & '));
+            // No players
+            teamAEl.innerHTML = '';
+            teamBEl.innerHTML = '';
         }
     };
     
     // Court 1 (first 4 players)
-    if (selectedPlayers.length >= 2) {
-        court1TeamA.innerHTML = formatTeamNames(selectedPlayers.slice(0, 2));
-    } else {
-        court1TeamA.innerHTML = '';
-    }
-    
-    if (selectedPlayers.length >= 4) {
-        court1TeamB.innerHTML = formatTeamNames(selectedPlayers.slice(2, 4));
-    } else {
-        court1TeamB.innerHTML = '';
-    }
+    assignAndRenderCourt(0, court1TeamA, court1TeamB);
     
     // Court 2 (players 4-7) - show/hide based on dual-court mode
     if (activePlayersCount >= 8 && selectedPlayers.length >= 8) {
@@ -1575,18 +1631,9 @@ function updateTeamPreview() {
         if (court1Number) court1Number.hidden = false;
         if (court2Number) court2Number.hidden = false;
         
+        // Render Court 2 with win probabilities
         if (court2TeamA && court2TeamB) {
-            if (selectedPlayers.length >= 6) {
-                court2TeamA.innerHTML = formatTeamNames(selectedPlayers.slice(4, 6));
-            } else {
-                court2TeamA.innerHTML = '';
-            }
-            
-            if (selectedPlayers.length >= 8) {
-                court2TeamB.innerHTML = formatTeamNames(selectedPlayers.slice(6, 8));
-            } else {
-                court2TeamB.innerHTML = '';
-            }
+            assignAndRenderCourt(4, court2TeamA, court2TeamB);
         }
     } else {
         // Hide court 2
@@ -1855,7 +1902,7 @@ async function loadMatchHistory() {
         currentSession = await api('./api/sessions/current');
         
         // Get matches for current session
-        const sessionData = await api(`/api/sessions/${currentSession.session_id}`);
+        const sessionData = await api(`./api/sessions/${currentSession.session_id}`);
         const matches = sessionData.matches || [];
         const tbody = qs('#matchHistoryBody');
         
@@ -1924,7 +1971,7 @@ async function deleteMatchFromHistory(matchId) {
     }
     
     try {
-        await api(`/api/matches/${matchId}`, {
+        await api(`./api/matches/${matchId}`, {
             method: 'DELETE'
         });
         
@@ -1943,7 +1990,7 @@ async function loadSessionStats() {
             return;
         }
         
-        const statsData = await api(`/api/sessions/${currentSession.session_id}/stats`);
+        const statsData = await api(`./api/sessions/${currentSession.session_id}/stats`);
         
         // Render player stats with bar chart
         const playerTbody = qs('#playerStatsBody');
@@ -2005,7 +2052,7 @@ async function loadPlayerEarnings() {
         }
         
         // Get session-specific earnings
-        const earningsData = await api(`/api/sessions/${currentSession.session_id}/earnings`);
+        const earningsData = await api(`./api/sessions/${currentSession.session_id}/earnings`);
         const earnings = earningsData.players || [];
         console.log('loadPlayerEarnings: Earnings data:', earnings);
         
@@ -2125,7 +2172,7 @@ async function loadPlayerMatchDetails(playerName, targetEl) {
     targetEl.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 0.5rem 0;">Loading match details...</div>';
     
     try {
-        const data = await api(`/api/current-session/player/${encodeURIComponent(playerName)}/matches`);
+        const data = await api(`./api/current-session/player/${encodeURIComponent(playerName)}/matches`);
         
         if (!data.matches || data.matches.length === 0) {
             targetEl.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 0.5rem 0;">No matches for this session</div>';
@@ -2184,7 +2231,7 @@ async function loadSessions() {
             
             try {
                 // Fetch earnings data for this session
-                const earningsData = await api(`/api/sessions/${session.session_id}/earnings`);
+                const earningsData = await api(`./api/sessions/${session.session_id}/earnings`);
                 players = earningsData.players || [];
                 
                 // Calculate player average: sum of games each player played / number of players
@@ -2550,7 +2597,7 @@ async function saveSessionDateEdit(sessionId) {
 }
 
 async function patchSessionDate(sessionId, newDate, merge = false) {
-    const response = await fetch(`/api/sessions/${sessionId}`, {
+    const response = await fetch(`./api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: {
             'Content-Type': 'application/json'
@@ -2575,7 +2622,7 @@ async function patchSessionDate(sessionId, newDate, merge = false) {
 
 async function loadSessionMatches(sessionId) {
     try {
-        const sessionData = await api(`/api/sessions/${sessionId}`);
+        const sessionData = await api(`./api/sessions/${sessionId}`);
         const tbody = qs(`#matches-${sessionId}`);
         
         if (sessionData.matches.length === 0) {
@@ -2625,7 +2672,7 @@ async function loadSessionMatches(sessionId) {
 
 async function loadSessionEarnings(sessionId) {
     try {
-        const earningsData = await api(`/api/sessions/${sessionId}/earnings`);
+        const earningsData = await api(`./api/sessions/${sessionId}/earnings`);
         const container = qs(`#earnings-${sessionId}`);
         
         if (!container) return;
@@ -2663,7 +2710,7 @@ async function loadSessionEarnings(sessionId) {
 
 async function loadHistorySessionStats(sessionId) {
     try {
-        const statsData = await api(`/api/sessions/${sessionId}/stats`);
+        const statsData = await api(`./api/sessions/${sessionId}/stats`);
         const tbody = qs(`#stats-${sessionId}`);
         
         if (!tbody) return;
@@ -2739,7 +2786,7 @@ async function deleteSession(sessionId, matchCount) {
     }
     
     try {
-        await api(`/api/sessions/${sessionId}`, {
+        await api(`./api/sessions/${sessionId}`, {
             method: 'DELETE'
         });
         
