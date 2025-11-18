@@ -1505,6 +1505,14 @@ body[data-page="matchups"] .container {
     min-height: 1.5rem;
 }
 
+/* Win probability percentage next to team names */
+.team-names .win-prob {
+    color: rgba(230, 240, 234, 0.70);
+    font-size: 0.9em;
+    font-weight: 500;
+    margin-left: 0.35rem;
+}
+
 /* Score inputs positioned near center */
 .court-row .score-input {
     width: 70px;
@@ -2430,6 +2438,13 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
         align-items: center !important;
         text-align: center !important;
         justify-content: center !important;
+    }
+    
+    /* Mobile: win probability on its own line below names */
+    .team-names .win-prob {
+        display: block !important;
+        margin-left: 0 !important;
+        margin-top: 2px !important;
     }
     
     .court-row .score-input {
