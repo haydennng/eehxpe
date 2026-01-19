@@ -22,8 +22,19 @@
         
         <!-- Player Selection -->
         <div class="form-group">
+            <!-- Mode Selection -->
+            <div class="mode-selection">
+                <button type="button" id="btn-mode-ffa" class="btn-mode active" title="Free For All - players can be paired with anyone">
+                    <span class="mode-icon" aria-hidden="true">🎲</span>
+                    <span>Free For All</span>
+                </button>
+                <button type="button" id="btn-mode-2v2" class="btn-mode" title="2v2 - lock team partners together">
+                    <span class="mode-icon" aria-hidden="true">🤝</span>
+                    <span>2v2</span>
+                </button>
+            </div>
+            
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <label class="form-label" style="margin-bottom: 0;">Players</label>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <button type="button" id="btn-clear-selected" class="btn btn-secondary btn-small" disabled title="Clear selected players">Clear</button>
                     <button type="button" id="btn-cycle-recommendation" class="btn btn-secondary btn-small" disabled title="Pick recommended players or cycle through recommendations" style="padding: 0.5rem 0.75rem;">
@@ -33,6 +44,9 @@
                             <path d="M3 22v-6h6"></path>
                             <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
                         </svg>
+                    </button>
+                    <button type="button" id="btn-lock-toggle" class="btn-lock-toggle" style="display: none;" title="Lock/unlock teams">
+                        <span id="lock-icon">🔓</span>
                     </button>
                 </div>
             </div>
@@ -64,15 +78,6 @@
                         aria-selected="true">
                     2
                 </button>
-                <button type="button" 
-                        class="courts-tab" 
-                        id="courts-tab-3" 
-                        data-courts="3" 
-                        role="tab" 
-                        aria-controls="courts-container" 
-                        aria-selected="false">
-                    3
-                </button>
             </nav>
             
             <!-- Courts Container -->
@@ -84,7 +89,7 @@
                         <div class="team-names" id="court1-teamA"></div>
                         <input type="number" class="score-input score-a" id="court1-score-a" min="0" placeholder="0" aria-label="Court 1 Team A Score">
                     </div>
-                    <img class="vs-icon" src="/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                    <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
                     <div class="team team-b" data-team="b">
                         <input type="number" class="score-input score-b" id="court1-score-b" min="0" placeholder="0" aria-label="Court 1 Team B Score">
                         <div class="team-names" id="court1-teamB"></div>
@@ -98,7 +103,7 @@
                         <div class="team-names" id="court2-teamA"></div>
                         <input type="number" class="score-input score-a" id="court2-score-a" min="0" placeholder="0" aria-label="Court 2 Team A Score">
                     </div>
-                    <img class="vs-icon" src="/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                    <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
                     <div class="team team-b" data-team="b">
                         <input type="number" class="score-input score-b" id="court2-score-b" min="0" placeholder="0" aria-label="Court 2 Team B Score">
                         <div class="team-names" id="court2-teamB"></div>
@@ -112,7 +117,7 @@
                         <div class="team-names" id="court3-teamA"></div>
                         <input type="number" class="score-input score-a" id="court3-score-a" min="0" placeholder="0" aria-label="Court 3 Team A Score">
                     </div>
-                    <img class="vs-icon" src="/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                    <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
                     <div class="team team-b" data-team="b">
                         <input type="number" class="score-input score-b" id="court3-score-b" min="0" placeholder="0" aria-label="Court 3 Team B Score">
                         <div class="team-names" id="court3-teamB"></div>
@@ -169,6 +174,15 @@
                                 aria-selected="false">
                             Stats
                         </button>
+                        <button type="button" 
+                                class="tab-item" 
+                                id="tab-queue" 
+                                data-tab-target="queue" 
+                                role="tab" 
+                                aria-controls="pane-queue" 
+                                aria-selected="false">
+                            Queue
+                        </button>
                     </nav>
                 </div>
                 <div class="carousel-card-body">
@@ -186,11 +200,11 @@
                                         <th class="col-score" style="width: 80px; text-align: center;">Score</th>
                                         <th class="col-team-b">Team B</th>
                                         <th class="col-bet" style="width: 80px; text-align: right;">Bet</th>
-                                        <th class="col-action" style="width: 80px; text-align: center;">Action</th>
+                                        <th id="matchupsActionsHeader" class="col-action" style="width: 80px; text-align: center;">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="matchHistoryBody">
-                                    <tr>
+                                    <tr id="matchHistoryEmptyRow">
                                         <td colspan="6" class="table-empty">No matches in today's session yet</td>
                                     </tr>
                                 </tbody>
@@ -255,6 +269,30 @@
                                         </tr>
                                     </tbody>
                                 </table>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Pane 4: Queue - Unplayed Pairings (hidden by default) -->
+                    <section id="pane-queue" 
+                             class="carousel-pane" 
+                             role="tabpanel" 
+                             aria-labelledby="tab-queue" 
+                             hidden>
+                        <div class="queue-container-compact">
+                            <div class="queue-columns">
+                                <div class="queue-column">
+                                    <h4 class="queue-heading">New Teammates</h4>
+                                    <div id="queueTeammatesList" class="queue-list-compact">
+                                        <div style="color: var(--text-muted); font-size: 0.75rem;">Loading...</div>
+                                    </div>
+                                </div>
+                                <div class="queue-column">
+                                    <h4 class="queue-heading">New Opponents</h4>
+                                    <div id="queueOpponentsList" class="queue-list-compact">
+                                        <div style="color: var(--text-muted); font-size: 0.75rem;">Loading...</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

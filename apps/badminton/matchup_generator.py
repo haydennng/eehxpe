@@ -20,7 +20,7 @@ from collections import defaultdict
 # 3. Opponent variety - tertiary factor (tie-breaker)
 SITOUT_WEIGHT = 100
 PARTNERSHIP_WEIGHT = 5
-OPPONENT_WEIGHT = 1
+OPPONENT_WEIGHT = 4
 
 
 class MatchupGenerator:

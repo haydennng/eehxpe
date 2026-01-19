@@ -20,8 +20,12 @@
     /* Team Colors */
     --team-a: #E76F51;
     --team-b: #4A90E2;
+    --team-c: #A855F7; /* Purple */
+    --team-d: #06B6D4; /* Cyan */
     --team-a-soft: rgba(231, 111, 81, 0.25);
     --team-b-soft: rgba(74, 144, 226, 0.25);
+    --team-c-soft: rgba(168, 85, 247, 0.25);
+    --team-d-soft: rgba(6, 182, 212, 0.25);
     
     /* Shadows */
     --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
@@ -58,7 +62,7 @@ a:hover {
 /* ==================== Navigation ==================== */
 .navbar {
     background: linear-gradient(135deg, var(--dg-900) 0%, var(--dg-700) 100%);
-    padding: 1rem 0;
+    padding: 0.75rem 0;
     box-shadow: var(--shadow-md);
     position: sticky;
     top: 0;
@@ -81,6 +85,17 @@ a:hover {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+}
+
+.nav-logo {
+    height: 72px;
+    width: auto;
+    display: block;
+    transition: transform 0.2s ease;
+}
+
+.nav-logo:hover {
+    transform: scale(1.05);
 }
 
 .nav-links {
@@ -194,8 +209,88 @@ body[data-page="matchups"] .container {
 .form-label {
     display: block;
     margin-bottom: 0.5rem;
-    color: var(--text);
     font-weight: 500;
+    color: var(--text);
+}
+
+/* Mode selection buttons (Free For All vs 2v2) */
+.mode-selection {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.btn-mode {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    background-color: var(--gm-700);
+    color: var(--text);
+    border: 2px solid var(--gm-700);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.btn-mode:hover:not(.active) {
+    background-color: var(--gm-800);
+    border-color: var(--dg-500);
+}
+
+.btn-mode.active {
+    background-color: var(--dg-700);
+    border-color: var(--dg-500);
+    color: var(--text);
+    box-shadow: 0 0 0 2px rgba(64, 145, 108, 0.3);
+}
+
+.btn-mode:focus-visible {
+    outline: 2px solid var(--dg-500);
+    outline-offset: 2px;
+}
+
+.btn-mode .mode-icon {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+/* Lock toggle button for 2v2 mode */
+.btn-lock-toggle {
+    padding: 0.5rem 0.75rem;
+    background-color: var(--gm-700);
+    color: var(--text);
+    border: 2px solid var(--gm-700);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: all 0.2s;
+    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+}
+
+.btn-lock-toggle:hover {
+    background-color: var(--gm-800);
+    border-color: var(--dg-500);
+}
+
+.btn-lock-toggle.locked {
+    background-color: var(--warn);
+    border-color: var(--warn);
+    color: var(--gm-900);
+}
+
+.btn-lock-toggle:focus-visible {
+    outline: 2px solid var(--dg-500);
+    outline-offset: 2px;
 }
 
 .form-input,
@@ -1262,6 +1357,7 @@ body[data-page="matchups"] .container {
     border: 1px solid var(--dg-700);
     border-radius: 8px;
     padding: 0.5rem 1rem;
+    margin-top: 1rem;
     margin-bottom: 0.5rem;
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 
                 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -1337,7 +1433,7 @@ body[data-page="matchups"] .container {
     grid-template-columns: 1fr;
     gap: 1rem;
     margin: 0 auto;
-    padding: 0.5rem 2rem 0.5rem;
+    padding: 1rem 2rem 0.5rem;
     max-width: 1440px;
     flex: 1;
     min-height: 0;
@@ -1362,7 +1458,7 @@ body[data-page="matchups"] .container {
     /* Make left column and history card match height */
     .left-column,
     .card--history {
-        height: 100%;
+       
         display: flex;
         flex-direction: column;
     }
@@ -1700,16 +1796,48 @@ body[data-page="matchups"] .container {
     text-align: center;
 }
 
-.player-name-btn:hover:not(:disabled) {
+.player-name-btn:hover:not(:disabled):not(.locked-inactive) {
     background-color: var(--gm-800);
     border-color: var(--dg-500);
 }
 
-.player-name-btn.selected {
-    background-color: var(--dg-700);
-    border-color: var(--dg-500);
-    color: var(--text);
-    box-shadow: 0 0 0 2px rgba(64, 145, 108, 0.3);
+/* Disable hover effect on mobile/phone mode */
+@media (max-width: 768px) {
+    .player-name-btn:hover:not(:disabled):not(.locked-inactive) {
+        background-color: var(--gm-700);
+        border-color: var(--gm-700);
+    }
+    
+    .player-name-btn.team-a:hover {
+        background-color: var(--team-a);
+        border-color: #c3523a;
+    }
+    
+    .player-name-btn.team-b:hover {
+        background-color: var(--team-b);
+        border-color: #1e7f75;
+    }
+    
+    .player-name-btn.team-c:hover {
+        background-color: var(--team-c);
+        border-color: #9333ea;
+    }
+    
+    .player-name-btn.team-d:hover {
+        background-color: var(--team-d);
+        border-color: #0891b2;
+    }
+}
+
+/* Locked inactive players - dimmed appearance */
+.player-name-btn.locked-inactive {
+    opacity: 0.25;
+    cursor: not-allowed;
+}
+
+.player-name-btn.locked-inactive:hover {
+    background-color: var(--gm-700);
+    border-color: var(--gm-700);
 }
 
 .player-name-btn:focus-visible {
@@ -1718,30 +1846,84 @@ body[data-page="matchups"] .container {
     z-index: 1;
 }
 
-/* Recommendation highlight styles (light background) */
+/* Disable focus outline on mobile */
+@media (max-width: 768px) {
+    .player-name-btn:focus-visible,
+    .player-name-btn:focus,
+    .player-name-btn:active {
+        outline: none;
+    }
+    
+    /* Ensure no visual change on tap/focus for mobile */
+    .player-name-btn:focus:not(.team-a):not(.team-b):not(.team-c):not(.team-d),
+    .player-name-btn:active:not(.team-a):not(.team-b):not(.team-c):not(.team-d) {
+        background-color: var(--gm-700);
+        border-color: var(--gm-700);
+    }
+    
+    /* Force team colors on mobile, overriding all states */
+    .player-name-btn.team-a {
+        background-color: var(--team-a) !important;
+        border-color: var(--team-a) !important;
+    }
+    
+    .player-name-btn.team-b {
+        background-color: var(--team-b) !important;
+        border-color: var(--team-b) !important;
+    }
+    
+    .player-name-btn.team-c {
+        background-color: var(--team-c) !important;
+        border-color: var(--team-c) !important;
+    }
+    
+    .player-name-btn.team-d {
+        background-color: var(--team-d) !important;
+        border-color: var(--team-d) !important;
+    }
+}
+
+/* Recommendation highlight styles (light background) - DISABLED */
 .player-name-btn.recommend-team-a {
-    background-color: var(--team-a-soft);
-    border-color: var(--team-a);
+    /* No visual change for recommendations */
 }
 
 .player-name-btn.recommend-team-b {
-    background-color: var(--team-b-soft);
-    border-color: var(--team-b);
+    /* No visual change for recommendations */
 }
 
 /* Team selection styles (override recommendation when selected) */
 .player-name-btn.team-a {
     background-color: var(--team-a);
-    border-color: #c3523a;
+    border-color: var(--team-a);
     color: #fff;
-    box-shadow: 0 0 0 2px rgba(231, 111, 81, 0.3);
 }
 
 .player-name-btn.team-b {
     background-color: var(--team-b);
-    border-color: #1e7f75;
+    border-color: var(--team-b);
     color: #fff;
-    box-shadow: 0 0 0 2px rgba(42, 157, 143, 0.3);
+}
+
+.player-name-btn.team-c {
+    background-color: var(--team-c);
+    border-color: var(--team-c);
+    color: #fff;
+}
+
+.player-name-btn.team-d {
+    background-color: var(--team-d);
+    border-color: var(--team-d);
+    color: #fff;
+}
+
+/* Recommendation highlights for team-c and team-d - DISABLED */
+.player-name-btn.recommend-team-c {
+    /* No visual change for recommendations */
+}
+
+.player-name-btn.recommend-team-d {
+    /* No visual change for recommendations */
 }
 
 /* Court watermarks on player buttons */
@@ -1754,7 +1936,7 @@ body[data-page="matchups"] .container {
     transform: translateY(-50%);
     font-size: 1.8rem;
     font-weight: 900;
-    opacity: 0.15;
+    opacity: 0.45;
     pointer-events: none;
     z-index: 0;
     line-height: 1;
@@ -1806,7 +1988,79 @@ body[data-page="matchups"] .container {
     z-index: 1;
 }
 
-/* Deactivated player state */
+/* Press-and-hold animation for deactivation */
+.player-toggle-btn.holding {
+    position: relative;
+    overflow: hidden;
+}
+
+.player-toggle-btn.holding::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    opacity: 0;
+    animation: holdDarken var(--hold-duration, 1500ms) linear forwards;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.player-toggle-btn.holding > * {
+    position: relative;
+    z-index: 2;
+}
+
+@keyframes holdDarken {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+.player-toggle-btn.hold-complete {
+    animation: holdFlash 300ms ease-out;
+}
+
+@keyframes holdFlash {
+    0%, 100% {
+        transform: scale(1);
+        background-color: #2e7d32;
+    }
+    50% {
+        transform: scale(0.95);
+        background-color: #1b5e20;
+    }
+}
+
+/* Inactive player state (visible but disabled) */
+.player-item.is-inactive .player-name-btn {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background-color: var(--gm-700);
+    border-color: var(--gm-700);
+    color: var(--text-muted);
+}
+
+.player-item.is-inactive .player-name-btn:disabled {
+    opacity: 0.45;
+}
+
+.player-item.is-inactive .player-toggle-btn {
+    background-color: #b23a3a;
+    border-color: #b23a3a;
+}
+
+.player-item.is-inactive .player-toggle-btn:hover {
+    background-color: #9a2f2f;
+    border-color: #9a2f2f;
+}
+
+/* Legacy support: is-deactivated is now is-inactive */
 .player-item.is-deactivated .player-name-btn {
     opacity: 0.45;
     cursor: not-allowed;
@@ -1827,6 +2081,122 @@ body[data-page="matchups"] .container {
 .player-item.is-deactivated .player-toggle-btn:hover {
     background-color: #9a2f2f;
     border-color: #9a2f2f;
+}
+
+/* Add player button (+ button) */
+.player-item--add-btn {
+    display: flex;
+    width: 100%;
+    position: relative;
+}
+
+.player-add-btn {
+    width: 100%;
+    background-color: var(--dg-700);
+    color: var(--text);
+    border: 2px dashed var(--dg-500);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1.5rem;
+    font-weight: 700;
+    transition: all 0.2s;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.player-add-btn:hover {
+    background-color: var(--dg-800);
+    border-color: var(--dg-400);
+    transform: scale(1.02);
+}
+
+.player-add-btn:focus-visible {
+    outline: 2px solid var(--dg-500);
+    outline-offset: 2px;
+    z-index: 1;
+}
+
+/* Deactivated players dropdown */
+.deactivated-dropdown {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%;
+    max-width: 500px;
+    background-color: var(--gm-800);
+    border: 2px solid var(--gm-600);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    z-index: 1001;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.deactivated-dropdown-header {
+    padding: 1.25rem 1.5rem;
+    background-color: var(--dg-700);
+    border-bottom: 2px solid var(--dg-500);
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--text);
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+
+.deactivated-dropdown-list {
+    padding: 1rem;
+    overflow-y: auto;
+    max-height: 60vh;
+    min-height: 100px;
+}
+
+.deactivated-player-item {
+    display: block;
+    width: 100%;
+    padding: 1.25rem 1.5rem;
+    background-color: var(--gm-700);
+    color: var(--text);
+    border: 2px solid var(--gm-600);
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    text-align: center;
+    margin-bottom: 0.75rem;
+}
+
+.deactivated-player-item:last-child {
+    margin-bottom: 0;
+}
+
+.deactivated-player-item:hover {
+    background-color: var(--dg-700);
+    border-color: var(--dg-500);
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(64, 145, 108, 0.3);
+}
+
+.deactivated-player-item:focus-visible {
+    outline: 2px solid var(--dg-500);
+    outline-offset: 2px;
+}
+
+/* Backdrop for dropdown */
+.deactivated-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.3);
+    z-index: 999;
+    backdrop-filter: blur(2px);
 }
 
 /* Legacy support for old single-button format */
@@ -2173,7 +2543,27 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
     min-height: 0;
 }
 
-/* ==================== Session Earnings Mini ==================== */
+/* ==================== Monthly Stats Sections ====================
+.month-section {
+    margin-bottom: 1.5rem;
+}
+
+.month-section:last-child {
+    margin-bottom: 0;
+}
+
+.month-header {
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ==================== Session Earnings Mini ====================
 .session-earnings-container {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -2471,13 +2861,13 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
     .bet-button-group {
         display: grid !important;
         grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
-        gap: 4px !important;
+        gap: 3px !important;
         width: 100%;
     }
     
     .btn-bet {
-        padding: 8px 4px !important;
-        font-size: 12px !important;
+        padding: 8px 2px !important;
+        font-size: 11px !important;
         line-height: 1 !important;
         min-width: 0 !important;
         white-space: nowrap;
@@ -2507,9 +2897,10 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
         display: none !important;
     }
 
-    /* Fixed bottom navigation bar - permanently visible and centered */
+    /* Fixed bottom navigation bar - logo on left, icons centered */
     .mobile-sidenav {
-        display: flex;
+        display: grid;
+        grid-template-columns: auto 1fr;
         position: fixed;
         bottom: 0;
         left: 0;
@@ -2520,8 +2911,27 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
         border-top: 2px solid var(--dg-500);
         box-shadow: 0 -2px 8px rgba(0,0,0,0.3);
         z-index: 1000;
-        justify-content: center;
         align-items: center;
+        padding: 0 8px 0 12px;
+    }
+    
+    /* Mobile logo on left side */
+    .mobile-nav-logo-link {
+        display: flex;
+        align-items: center;
+        padding: 8px;
+        height: 100%;
+        justify-self: start;
+    }
+    
+    .mobile-nav-logo {
+        height: 36px;
+        width: auto;
+        transition: transform 0.2s ease;
+    }
+    
+    .mobile-nav-logo-link:active .mobile-nav-logo {
+        transform: scale(0.95);
     }
 
     /* Mobile nav items - centered horizontal layout */
@@ -2535,6 +2945,7 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
         gap: 0;
         align-items: center;
         justify-content: center;
+        justify-self: center;
     }
     
     .mobile-nav-item {
@@ -2547,13 +2958,13 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 0 16px;
+        padding: 0 10px;
         text-decoration: none;
         color: var(--text);
         transition: transform 0.2s ease;
         height: 100%;
-        min-width: 56px;
-        margin: 0 4px;
+        min-width: 48px;
+        margin: 0 2px;
     }
     
     .mobile-nav-link:hover,
@@ -2709,6 +3120,66 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
     .stats-table-scroll {
         max-height: none !important;
         overflow: visible !important;
+    }
+}
+
+/* ==================== Queue Tab ==================== */
+.queue-container-compact {
+    padding: 0.5rem;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.queue-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.queue-column {
+    min-width: 0;
+}
+
+.queue-heading {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    margin-bottom: 0.35rem;
+    font-weight: 600;
+}
+
+.queue-list-compact {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.queue-item {
+    padding: 0.3rem 0.5rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+    color: var(--text);
+    font-size: 0.75rem;
+    line-height: 1.3;
+    transition: all 0.15s ease;
+}
+
+.queue-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(64, 145, 108, 0.2);
+}
+
+@media (max-width: 900px) {
+    .queue-columns {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+    
+    .queue-item {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.4rem;
     }
 }
 
@@ -3094,6 +3565,263 @@ td .date-design {
     display: grid;
     grid-template-columns: 1fr;
     gap: 1.5rem;
+}
+
+/* ==================== History Edit Mode Styles ==================== */
+
+/* Add game form container */
+.add-game-form {
+    background-color: var(--gm-700);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border: 2px solid var(--dg-700);
+}
+
+.add-game-form.is-hidden {
+    display: none;
+}
+
+/* Add game button */
+.btn-add-game {
+    width: 10%;
+    min-width: 50px;
+    max-width: 80px;
+    padding: 0.25rem;
+    background-color: var(--dg-700);
+    color: var(--text);
+    border: 2px dashed var(--dg-500);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    margin-bottom: 1rem;
+    margin-left: 0.5rem;
+    display: block;
+    text-align: center;
+}
+
+.btn-add-game:hover {
+    background-color: var(--dg-600);
+    border-style: solid;
+}
+
+/* Compact player pills for history edit */
+.history-player-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 0.75rem;
+}
+
+.history-player-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.5rem;
+    border-radius: 9999px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--text);
+    background-color: var(--gm-600);
+    border: 2px solid var(--gm-600);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.history-player-pill:hover {
+    background-color: var(--gm-500);
+    transform: translateY(-1px);
+}
+
+.history-player-pill.selected {
+    background-color: var(--dg-700);
+    border-color: var(--dg-500);
+    box-shadow: 0 0 0 2px rgba(64, 145, 108, 0.3);
+}
+
+.history-player-pill.team-a {
+    background-color: var(--team-a);
+    border-color: #c3523a;
+    color: #fff;
+}
+
+.history-player-pill.team-b {
+    background-color: var(--team-b);
+    border-color: #1e7f75;
+    color: #fff;
+}
+
+/* Score inputs in forms */
+.form-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    align-items: center;
+}
+
+.form-row label {
+    flex: 0 0 auto;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.form-row input[type="number"] {
+    flex: 1;
+    padding: 0.5rem;
+    background-color: var(--gm-800);
+    border: 2px solid var(--gm-600);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.875rem;
+}
+
+.form-row input[type="number"]:focus {
+    outline: none;
+    border-color: var(--dg-500);
+}
+
+/* Bet selector in forms */
+.form-bet-selector {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.form-bet-selector .btn-bet-small {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.875rem;
+    background-color: var(--gm-600);
+    color: var(--text);
+    border: 2px solid var(--gm-600);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 600;
+}
+
+.form-bet-selector .btn-bet-small:hover {
+    background-color: var(--gm-500);
+}
+
+.form-bet-selector .btn-bet-small.selected {
+    background-color: var(--dg-700);
+    border-color: var(--dg-500);
+}
+
+/* Form actions */
+.form-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+/* Edit mode for match rows */
+.match-row-edit {
+    background-color: var(--gm-700);
+}
+
+.match-row-edit td {
+    padding: 0.75rem 0.5rem !important;
+}
+
+/* Edit inline controls */
+.edit-inline-controls {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+}
+
+.edit-inline-controls .btn-small {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.75rem;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+    .add-game-form {
+        padding: 0.75rem;
+    }
+    
+    .history-player-pill {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.4rem;
+    }
+    
+    .form-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+    
+    .form-row label {
+        font-size: 0.8rem;
+    }
+    
+    .form-bet-selector .btn-bet-small {
+        flex: 1;
+        min-width: 60px;
+    }
+}
+
+/* ==================== Pagination Styles ==================== */
+
+.pagination {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.pagination-btn {
+    padding: 0.5rem 0.75rem;
+    background-color: var(--gm-700);
+    color: var(--text);
+    border: 2px solid var(--gm-600);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    min-width: 40px;
+    text-align: center;
+}
+
+.pagination-btn:hover {
+    background-color: var(--gm-600);
+    border-color: var(--dg-500);
+}
+
+.pagination-btn.active {
+    background-color: var(--dg-700);
+    border-color: var(--dg-500);
+    color: var(--text);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pagination-ellipsis {
+    color: var(--text-muted);
+    padding: 0 0.25rem;
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    .pagination {
+        gap: 0.25rem;
+    }
+    
+    .pagination-btn {
+        padding: 0.4rem 0.6rem;
+        font-size: 0.8rem;
+        min-width: 36px;
+    }
 }
 
 @media (min-width: 769px) {

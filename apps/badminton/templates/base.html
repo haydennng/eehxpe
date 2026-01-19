@@ -8,15 +8,15 @@
     <title>{% block title %}Badminton Matchup Manager{% endblock %}</title>
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="manifest" href="/badminton/static/manifest.json">
     
     <!-- iOS PWA Support -->
-    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+    <link rel="apple-touch-icon" href="/badminton/static/icons/icon-192.png">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Badminton">
     
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="/badminton/static/css/style.css?v={{ range(1, 999999999) | random }}">
 </head>
 <body data-page="{% block page_id %}{% endblock %}">
     <!-- Mobile hamburger (visible only on mobile via CSS) -->
@@ -32,30 +32,39 @@
 
     <!-- Mobile dropdown navigation (slides down from hamburger) -->
     <nav id="mobile-sidenav" class="mobile-sidenav" aria-hidden="true">
+        <!-- Mobile logo on the left -->
+        <a href="/badminton/" class="mobile-nav-logo-link">
+            <img src="/badminton/static/images/logo.png?v={{ range(1, 999999999) | random }}" alt="eehxpe" class="mobile-nav-logo">
+        </a>
         <ul class="mobile-nav-list">
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="{{ url_for('index') }}" aria-label="Dashboard">
-                    <img src="{{ url_for('static', filename='images/dashboard.svg') }}" alt="" class="mobile-nav-icon">
+                <a class="mobile-nav-link" href="/badminton/dashboard" aria-label="Dashboard">
+                    <img src="/badminton/static/images/dashboard.svg" alt="" class="mobile-nav-icon">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="{{ url_for('players') }}" aria-label="Players">
-                    <img src="{{ url_for('static', filename='images/players.svg') }}" alt="" class="mobile-nav-icon">
+                <a class="mobile-nav-link" href="/badminton/profile" aria-label="Profile">
+                    <img src="/badminton/static/images/players.svg" alt="" class="mobile-nav-icon">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link mobile-nav-link--matchups" href="{{ url_for('matchups') }}" aria-label="Matchups">
-                    <img src="{{ url_for('static', filename='images/matchups.svg') }}" alt="" class="mobile-nav-icon mobile-nav-icon--gradient">
+                <a class="mobile-nav-link" href="/badminton/players" aria-label="Players">
+                    <img src="/badminton/static/images/players.svg" alt="" class="mobile-nav-icon">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="{{ url_for('history') }}" aria-label="History">
-                    <img src="{{ url_for('static', filename='images/history.svg') }}" alt="" class="mobile-nav-icon">
+                <a class="mobile-nav-link mobile-nav-link--matchups" href="/badminton/matchups" aria-label="Matchups">
+                    <img src="/badminton/static/images/matchups.svg" alt="" class="mobile-nav-icon mobile-nav-icon--gradient">
                 </a>
             </li>
             <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="{{ url_for('stats') }}" aria-label="Stats">
-                    <img src="{{ url_for('static', filename='images/stats.svg') }}" alt="" class="mobile-nav-icon">
+                <a class="mobile-nav-link" href="/badminton/history" aria-label="History">
+                    <img src="/badminton/static/images/history.svg" alt="" class="mobile-nav-icon">
+                </a>
+            </li>
+            <li class="mobile-nav-item">
+                <a class="mobile-nav-link" href="/badminton/stats" aria-label="Stats">
+                    <img src="/badminton/static/images/stats.svg" alt="" class="mobile-nav-icon">
                 </a>
             </li>
         </ul>
@@ -67,13 +76,18 @@
     <!-- Navigation -->
     <nav class="navbar desktop-navbar">
         <div class="nav-container">
-            <a href="{{ url_for('index') }}" class="nav-brand">🏸 Badminton Manager</a>
+            <a href="/badminton/" class="nav-brand">
+                <img src="/badminton/static/images/logo.png?v={{ range(1, 999999999) | random }}" alt="Badminton Manager" class="nav-logo">
+            </a>
             <ul class="nav-links">
-                <li><a href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}class="active"{% endif %}>Dashboard</a></li>
-                <li><a href="{{ url_for('players') }}" {% if request.endpoint == 'players' %}class="active"{% endif %}>Players</a></li>
-                <li><a href="{{ url_for('matchups') }}" {% if request.endpoint == 'matchups' %}class="active"{% endif %}>Matchups</a></li>
-                <li><a href="{{ url_for('history') }}" {% if request.endpoint == 'history' %}class="active"{% endif %}>History</a></li>
-                <li><a href="{{ url_for('stats') }}" {% if request.endpoint == 'stats' %}class="active"{% endif %}>Stats</a></li>
+                <li><a href="/badminton/dashboard" {% if request.endpoint == 'dashboard_page' %}class="active"{% endif %}>Dashboard</a></li>
+                {% if current_user.is_authenticated %}
+                <li><a href="/badminton/profile" {% if request.endpoint == 'profile_page' %}class="active"{% endif %}>Profile</a></li>
+                {% endif %}
+                <li><a href="/badminton/players" {% if request.endpoint == 'players_page' %}class="active"{% endif %}>Players</a></li>
+                <li><a href="/badminton/matchups" {% if request.endpoint == 'matchups_page' %}class="active"{% endif %}>Matchups</a></li>
+                <li><a href="/badminton/history" {% if request.endpoint == 'history_page' %}class="active"{% endif %}>History</a></li>
+                <li><a href="/badminton/stats" {% if request.endpoint == 'stats_page' %}class="active"{% endif %}>Stats</a></li>
             </ul>
         </div>
     </nav>
@@ -89,14 +103,14 @@
     <!-- JavaScript -->
     {% block extra_js %}{% endblock %}
     {% block main_js %}
-    <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
+    <script src="/badminton/static/js/main.js?v=1767444723" defer></script>
     {% endblock %}
     
     <!-- PWA Service Worker Registration -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('{{ url_for('static', filename='sw.js') }}')
+                navigator.serviceWorker.register('/badminton/sw.js')
                     .then(reg => console.log('[PWA] Service worker registered:', reg.scope))
                     .catch(err => console.error('[PWA] Service worker registration failed:', err));
             });

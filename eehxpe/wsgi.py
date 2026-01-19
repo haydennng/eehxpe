@@ -16,9 +16,12 @@ if env_file.exists():
             if line and not line.startswith('#') and '=' in line:
                 key, value = line.split('=', 1)
                 os.environ.setdefault(key, value)
-    print(f"✓ Loaded environment from {env_file}")
+    print(f"Loaded environment from {env_file}")
 else:
-    print(f"⚠ Warning: {env_file} not found")
+    print(f"Warning: {env_file} not found")
+
+# Set flag to indicate we're running under WSGI dispatcher
+os.environ['WSGI_DISPATCHER'] = 'true'
 
 # Add project root and apps to path for imports
 project_root = Path(__file__).parent.parent
@@ -37,9 +40,9 @@ badminton_app = None
 try:
     # Import the badminton Flask app
     from app import app as badminton_app
-    print("✓ Badminton app loaded successfully")
+    print("Badminton app loaded successfully")
 except Exception as e:
-    print(f"✗ Failed to load badminton app: {e}")
+    print(f"Failed to load badminton app: {e}")
     import traceback
     traceback.print_exc()
 
@@ -47,7 +50,7 @@ except Exception as e:
 mounts = {}
 if badminton_app:
     mounts["/badminton"] = badminton_app
-    print(f"✓ Mounted badminton app at /badminton")
+    print(f"Mounted badminton app at /badminton")
 
 # Create the dispatcher
 application = DispatcherMiddleware(not_found_app, mounts)

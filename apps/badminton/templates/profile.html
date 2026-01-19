@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - {{ user.username }}{% endblock %}
+{% block page_id %}profile{% endblock %}
+
+{% block content %}
+<div class="profile-container">
+    <!-- User Header -->
+    <div class="profile-header">
+        <div class="profile-info">
+            <div class="profile-avatar">
+                <div class="avatar-circle">{{ user.username[0].upper() }}</div>
+            </div>
+            <div class="profile-details">
+                <h1 class="profile-username">{{ user.username }}</h1>
+                <p class="profile-role">{{ user.role.value.title() }}</p>
+            </div>
+        </div>
+        <div class="profile-actions">
+            <button class="btn-change-password" onclick="showChangePasswordModal()">Change Password</button>
+            <button class="btn-logout" onclick="logout()">Logout</button>
+        </div>
+    </div>
+    
+    <!-- Change Password Modal -->
+    <div id="changePasswordModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Change Password</h2>
+            <form id="changePasswordForm">
+                <div class="form-group">
+                    <label for="currentPassword">Current Password</label>
+                    <input type="password" id="currentPassword" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label for="newPassword">New Password</label>
+                    <input type="password" id="newPassword" class="form-input" minlength="6" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm New Password</label>
+                    <input type="password" id="confirmPassword" class="form-input" minlength="6" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="hideChangePasswordModal()">Cancel</button>
+                    <button type="submit" class="btn-submit">Change Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Personal Stats Grid -->
+    <div class="section-header">
+        <h2>Personal Stats</h2>
+    </div>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">🏆</div>
+            <div class="stat-value" id="mmr-value">{{ "%.0f"|format(user.mmr) }}</div>
+            <div class="stat-label">MMR Rating</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">🎯</div>
+            <div class="stat-value" id="matches-value">-</div>
+            <div class="stat-label">Total Matches</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-value" id="winrate-value">-</div>
+            <div class="stat-label">Win Rate</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-value" id="earnings-value">-</div>
+            <div class="stat-label">Net Earnings</div>
+        </div>
+    </div>
+    
+    <!-- Top 5 Partners by Win Rate -->
+    <div class="section-header">
+        <h2>Top 5 Partners (by Win Rate)</h2>
+        <p class="section-subtitle">Minimum 5 games played together</p>
+    </div>
+    <div class="card">
+        <div class="winrates-list" id="top-partners-winrate">
+            <div class="loading">Loading partners...</div>
+        </div>
+    </div>
+    
+    <!-- Top 3 with Highest Loss Rate -->
+    <div class="section-header">
+        <h2>Top 3 with Highest Loss Rate</h2>
+        <p class="section-subtitle">Opponents you struggle against most (min 5 games)</p>
+    </div>
+    <div class="card">
+        <div class="winrates-list" id="top-opponents-lost">
+            <div class="loading">Loading opponents...</div>
+        </div>
+    </div>
+    
+    <!-- Top 3 with Highest Win Rate -->
+    <div class="section-header">
+        <h2>Top 3 with Highest Win Rate</h2>
+        <p class="section-subtitle">Opponents you dominate most (min 5 games)</p>
+    </div>
+    <div class="card">
+        <div class="winrates-list" id="top-opponents-won">
+            <div class="loading">Loading opponents...</div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .profile-container {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding: 1.25rem;
+        background-color: var(--gm-800);
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .profile-info {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    
+    .avatar-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--dg-900) 0%, var(--dg-700) 100%);
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        font-weight: bold;
+    }
+    
+    .profile-username {
+        margin: 0;
+        font-size: 1.5rem;
+        color: var(--text);
+    }
+    
+    .profile-role {
+        margin: 0.25rem 0 0 0;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+    
+    .profile-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .btn-change-password {
+        padding: 0.5rem 1rem;
+        background: var(--dg-500);
+        color: var(--text);
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .btn-change-password:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+    }
+    
+    .btn-logout {
+        padding: 0.5rem 1rem;
+        background: var(--danger);
+        color: var(--text);
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .btn-logout:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+    }
+    
+    .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+    
+    .modal-content {
+        background: var(--gm-800);
+        padding: 1.5rem;
+        border-radius: 8px;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: var(--shadow-lg);
+    }
+    
+    .modal-content h2 {
+        margin: 0 0 1rem 0;
+        color: var(--text);
+        font-size: 1.25rem;
+    }
+    
+    .form-group {
+        margin-bottom: 1rem;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 0.25rem;
+        color: var(--text);
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+    
+    .form-input {
+        width: 100%;
+        padding: 0.5rem;
+        background: var(--gm-700);
+        border: 1px solid var(--gm-600);
+        border-radius: 4px;
+        color: var(--text);
+        font-size: 0.875rem;
+        box-sizing: border-box;
+    }
+    
+    .form-input:focus {
+        outline: none;
+        border-color: var(--dg-500);
+    }
+    
+    .modal-actions {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: flex-end;
+        margin-top: 1.5rem;
+    }
+    
+    .btn-cancel {
+        padding: 0.5rem 1rem;
+        background: var(--gm-600);
+        color: var(--text);
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .btn-cancel:hover {
+        background: var(--gm-500);
+    }
+    
+    .btn-submit {
+        padding: 0.5rem 1rem;
+        background: var(--dg-600);
+        color: var(--text);
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .btn-submit:hover {
+        background: var(--dg-500);
+    }
+    
+    .section-header {
+        margin: 2rem 0 0.75rem 0;
+    }
+    
+    .section-header h2 {
+        margin: 0;
+        color: var(--text);
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+    
+    .section-subtitle {
+        margin: 0.25rem 0 0 0;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+        font-weight: 400;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        max-width: 600px;
+    }
+    
+    .stats-grid .stat-card {
+        background-color: var(--gm-700);
+        padding: 0.75rem;
+        border-radius: 6px;
+        border-left: 2px solid var(--dg-500);
+        aspect-ratio: 1 / 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+    }
+    
+    .stat-icon {
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .stats-grid .stat-value {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: var(--text);
+        line-height: 1;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        margin-bottom: 0.25rem;
+    }
+    
+    .stats-grid .stat-label {
+        color: var(--dg-500);
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+        line-height: 1.1;
+        text-shadow: 0 0 8px rgba(64, 145, 108, 0.4);
+    }
+    
+    .card {
+        background-color: var(--gm-800);
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: var(--shadow-sm);
+        margin-bottom: 1.5rem;
+    }
+    
+    .winrates-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .loading {
+        text-align: center;
+        color: var(--text-muted);
+        padding: 1rem;
+        font-style: italic;
+    }
+</style>
+
+<script>
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+    
+    async function loadPersonalStats() {
+        try {
+            console.log('[Profile] Loading personal stats...');
+            const response = await fetch('/badminton/api/profile');
+            if (response.ok) {
+                const stats = await response.json();
+                console.log('[Profile] Stats loaded:', stats);
+                document.getElementById('matches-value').textContent = stats.total_matches || 0;
+                document.getElementById('winrate-value').textContent = (stats.win_rate || 0).toFixed(1) + '%';
+                document.getElementById('earnings-value').textContent = '$' + (stats.total_earnings || 0).toFixed(2);
+            } else {
+                console.error('[Profile] Failed to load stats:', response.status);
+            }
+        } catch (error) {
+            console.error('[Profile] Error loading personal stats:', error);
+        }
+    }
+    
+    async function loadPartners() {
+        try {
+            console.log('[Profile] Loading partners...');
+            const response = await fetch('/badminton/api/profile/partners');
+            if (!response.ok) {
+                console.error('[Profile] Partners API failed:', response.status);
+                return;
+            }
+            
+            const partners = await response.json();
+            console.log('[Profile] Partners loaded:', partners.length);
+            
+            if (partners.length === 0) {
+                document.getElementById('top-partners-winrate').innerHTML = '<div class="loading">No partners with 5+ games yet</div>';
+                return;
+            }
+            
+            // Partners are already sorted by win rate and limited to top 5 from backend
+            // Render Top 5 by Win Rate
+            document.getElementById('top-partners-winrate').innerHTML = partners.map(p => {
+                const winPercent = Math.round(p.win_rate);
+                const lossPercent = 100 - winPercent;
+                
+                return `
+                    <div class="win-rate-row">
+                        <div class="name">${escapeHtml(p.partner)}</div>
+                        <div class="games">${p.total_games}</div>
+                        <div class="bar-container">
+                            <div class="win-rate-bar">
+                                <div class="win-rate-bar-segment win-segment" style="width: ${winPercent}%"></div>
+                                <div class="win-rate-bar-segment loss-segment" style="width: ${lossPercent}%"></div>
+                                <div class="win-rate-label">${winPercent}%</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            console.error('[Profile] Error loading partners:', error);
+        }
+    }
+    
+    async function loadOpponents() {
+        try {
+            console.log('[Profile] Loading opponents...');
+            const response = await fetch('/badminton/api/profile/opponents');
+            if (!response.ok) {
+                console.error('[Profile] Opponents API failed:', response.status);
+                document.getElementById('top-opponents-lost').innerHTML = '<div class="loading">Failed to load opponents</div>';
+                document.getElementById('top-opponents-won').innerHTML = '<div class="loading">Failed to load opponents</div>';
+                return;
+            }
+            
+            const opponents = await response.json();
+            console.log('[Profile] Opponents loaded:', opponents);
+            
+            // Backend already returns top 3 with highest loss/win rates
+            const mostLostAgainst = opponents.lost_against;
+            const mostWonAgainst = opponents.won_against;
+            
+            // Render opponents with highest loss rate (you lose most against)
+            if (mostLostAgainst.length === 0) {
+                document.getElementById('top-opponents-lost').innerHTML = '<div class="loading">No opponents with 5+ games yet</div>';
+            } else {
+                document.getElementById('top-opponents-lost').innerHTML = mostLostAgainst.map(o => {
+                    const lossPercent = Math.round(o.loss_rate);
+                    const winPercent = 100 - lossPercent;
+                    
+                    return `
+                        <div class="win-rate-row">
+                            <div class="name">${escapeHtml(o.opponent)}</div>
+                            <div class="games">${o.total_games}</div>
+                            <div class="bar-container">
+                                <div class="win-rate-bar">
+                                    <div class="win-rate-bar-segment win-segment" style="width: ${winPercent}%"></div>
+                                    <div class="win-rate-bar-segment loss-segment" style="width: ${lossPercent}%"></div>
+                                    <div class="win-rate-label">${lossPercent}% loss</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            // Render opponents with highest win rate (you win most against)
+            if (mostWonAgainst.length === 0) {
+                document.getElementById('top-opponents-won').innerHTML = '<div class="loading">No opponents with 5+ games yet</div>';
+            } else {
+                document.getElementById('top-opponents-won').innerHTML = mostWonAgainst.map(o => {
+                    const winPercent = Math.round(o.win_rate);
+                    const lossPercent = 100 - winPercent;
+                    
+                    return `
+                        <div class="win-rate-row">
+                            <div class="name">${escapeHtml(o.opponent)}</div>
+                            <div class="games">${o.total_games}</div>
+                            <div class="bar-container">
+                                <div class="win-rate-bar">
+                                    <div class="win-rate-bar-segment win-segment" style="width: ${winPercent}%"></div>
+                                    <div class="win-rate-bar-segment loss-segment" style="width: ${lossPercent}%"></div>
+                                    <div class="win-rate-label">${winPercent}% win</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        } catch (error) {
+            console.error('[Profile] Error loading opponents:', error);
+        }
+    }
+    
+    async function logout() {
+        try {
+            const response = await fetch('/badminton/api/logout', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                window.location = '/badminton/login';
+            }
+        } catch (error) {
+            console.error('Logout failed:', error);
+            alert('Logout failed. Please try again.');
+        }
+    }
+    
+    function showChangePasswordModal() {
+        document.getElementById('changePasswordModal').style.display = 'flex';
+        document.getElementById('changePasswordForm').reset();
+    }
+    
+    function hideChangePasswordModal() {
+        document.getElementById('changePasswordModal').style.display = 'none';
+        document.getElementById('changePasswordForm').reset();
+    }
+    
+    // Close modal on outside click
+    document.getElementById('changePasswordModal').addEventListener('click', (e) => {
+        if (e.target.id === 'changePasswordModal') {
+            hideChangePasswordModal();
+        }
+    });
+    
+    // Handle change password form submission
+    document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const currentPassword = document.getElementById('currentPassword').value;
+        const newPassword = document.getElementById('newPassword').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        
+        // Validate passwords match
+        if (newPassword !== confirmPassword) {
+            alert('New passwords do not match');
+            return;
+        }
+        
+        // Validate password length
+        if (newPassword.length < 6) {
+            alert('New password must be at least 6 characters');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/badminton/api/profile/change-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    current_password: currentPassword,
+                    new_password: newPassword
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert('Password changed successfully!');
+                hideChangePasswordModal();
+            } else {
+                alert(data.error || 'Failed to change password');
+            }
+        } catch (error) {
+            console.error('Error changing password:', error);
+            alert('An error occurred while changing password');
+        }
+    });
+    
+    // Load all data on page load
+    loadPersonalStats();
+    loadPartners();
+    loadOpponents();
+</script>
+{% endblock %}

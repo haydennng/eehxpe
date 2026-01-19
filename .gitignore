@@ -23,6 +23,9 @@ backups/
 secrets/
 *.log
 
+# Allow development environment (no secrets)
+!.env.development
+
 # Deployment tracking (local only)
 .last_deployed_commit
 .requirements.sha1

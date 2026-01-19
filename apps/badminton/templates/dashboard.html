@@ -1,0 +1,527 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Badminton Manager{% endblock %}
+{% block page_id %}dashboard{% endblock %}
+
+{# Override main_js block to prevent main.js from loading (dashboard has its own inline JS) #}
+{% block main_js %}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <p>Lobby overview and statistics</p>
+</div>
+
+<!-- Lobby Stats Grid -->
+<div class="lobby-stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Players</div>
+        <div class="stat-value" id="total-players">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Matches</div>
+        <div class="stat-value" id="total-matches">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Sessions</div>
+        <div class="stat-value" id="total-sessions">-</div>
+    </div>
+</div>
+
+<!-- Monthly Earnings - Current Month -->
+<div class="card" id="currentMonthCard">
+    <div class="card-header" id="currentMonthHeader">Current Month</div>
+    <div class="session-earnings-mini" id="currentMonthList">
+        <div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">Loading earnings...</div>
+    </div>
+</div>
+
+<!-- Monthly Earnings - Last Month -->
+<div class="card" id="lastMonthCard">
+    <div class="card-header" id="lastMonthHeader">Last Month</div>
+    <div class="session-earnings-mini" id="lastMonthList">
+        <div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">Loading earnings...</div>
+    </div>
+</div>
+
+<!-- Last 5 Sessions -->
+<div class="card" id="quickRecapCard">
+    <div class="card-header">Last 5 Sessions</div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th style="width: 150px;">Date</th>
+                    <th>Players</th>
+                    <th style="width: 100px; text-align: center;">Games</th>
+                </tr>
+            </thead>
+            <tbody id="quickRecapTableBody">
+                <tr>
+                    <td colspan="3" class="table-empty">Loading sessions...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- MMR Leaderboard -->
+<div class="section-header">
+    <h2>Player MMR Leaderboard</h2>
+</div>
+<div class="card leaderboard-card">
+    <div class="leaderboard" id="leaderboard">
+        <div class="loading">Loading leaderboard...</div>
+    </div>
+</div>
+
+<style>
+    .lobby-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        max-width: 350px;
+    }
+    
+    .lobby-stats-grid .stat-card {
+        background-color: var(--gm-700);
+        padding: 0.75rem;
+        border-radius: 6px;
+        border-left: 2px solid var(--dg-500);
+        aspect-ratio: 1 / 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+    }
+    
+    .lobby-stats-grid .stat-value {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: var(--text);
+        line-height: 1;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        margin-bottom: 0.25rem;
+    }
+    
+    .lobby-stats-grid .stat-label {
+        color: var(--dg-500);
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+        line-height: 1.1;
+        text-shadow: 0 0 8px rgba(64, 145, 108, 0.4);
+    }
+    
+    .section-header {
+        margin: 2rem 0 0.75rem 0;
+    }
+    
+    .section-header h2 {
+        margin: 0;
+        color: var(--text);
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+    
+    .leaderboard-card {
+        background-color: var(--gm-800);
+        border-radius: 8px;
+        padding: 0;
+        box-shadow: var(--shadow-sm);
+        margin-bottom: 1.5rem;
+        overflow: hidden;
+    }
+    
+    .leaderboard {
+        padding: 0;
+    }
+    
+    .leaderboard-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--gm-700);
+        transition: background-color 0.2s;
+    }
+    
+    .leaderboard-item:hover {
+        background-color: rgba(64, 145, 108, 0.1);
+    }
+    
+    .leaderboard-item:last-child {
+        border-bottom: none;
+    }
+    
+    .leaderboard-rank {
+        font-size: 1rem;
+        font-weight: bold;
+        color: var(--text-muted);
+        min-width: 30px;
+    }
+    
+    .leaderboard-name {
+        font-weight: 600;
+        color: var(--text);
+        font-size: 0.95rem;
+        flex: 1;
+        margin-left: 1rem;
+    }
+    
+    .leaderboard-mmr {
+        font-size: 1rem;
+        font-weight: bold;
+        color: var(--dg-500);
+    }
+    
+    .loading {
+        text-align: center;
+        color: var(--text-muted);
+        padding: 1rem;
+        font-style: italic;
+    }
+    
+    .session-earnings-mini {
+        padding: 0.75rem 1rem;
+    }
+    
+    .session-earnings-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--gm-700);
+    }
+    
+    .session-earnings-item:last-child {
+        border-bottom: none;
+    }
+    
+    .earnings-positive {
+        color: var(--ok);
+    }
+    
+    .earnings-negative {
+        color: var(--danger);
+    }
+</style>
+
+<script>
+    // Utility functions
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+    
+    function formatEarnings(amount) {
+        const absAmount = Math.abs(Number(amount));
+        const formatted = absAmount.toFixed(2);
+        
+        if (amount > 0) {
+            return { text: `+$${formatted}`, className: 'earnings-positive' };
+        } else if (amount < 0) {
+            return { text: `-$${formatted}`, className: 'earnings-negative' };
+        } else {
+            return { text: `$${formatted}`, className: '' };
+        }
+    }
+    
+    function formatSignedInt(value) {
+        const n = Math.round(Number(value) || 0);
+        if (n > 0) return '+' + n;
+        if (n < 0) return String(n);
+        return '0';
+    }
+    
+    function formatDateDesign(dateStr) {
+        try {
+            let date;
+            if (typeof dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                const [year, month, day] = dateStr.split('-').map(Number);
+                date = new Date(year, month - 1, day);
+            } else {
+                date = new Date(dateStr);
+            }
+            
+            if (isNaN(date.getTime())) {
+                return escapeHtml(dateStr || '—');
+            }
+            
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const dow = days[date.getDay()];
+            const ariaLabel = `${dow} ${year}-${month}-${day}`;
+            
+            return `<div class="date-design" role="group" aria-label="${ariaLabel}">
+                <div class="date-design__dow">${dow}</div>
+                <div class="date-design__date">
+                    <span class="date-design__year">${year}</span> <span class="date-design__month">${month}</span> <span class="date-design__day">${day}</span>
+                </div>
+            </div>`;
+        } catch (error) {
+            console.error('formatDateDesign error:', error);
+            return escapeHtml(dateStr || '—');
+        }
+    }
+    
+    function getTodayLocalDate() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+    
+    async function loadLobbyStats() {
+        try {
+            console.log('[Dashboard] Loading lobby stats...');
+            const [playersRes, matchesRes, sessionsRes] = await Promise.all([
+                fetch('/badminton/api/players/stats'),
+                fetch('/badminton/api/matches'),
+                fetch('/badminton/api/sessions')
+            ]);
+            
+            if (playersRes.ok) {
+                const players = await playersRes.json();
+                console.log('[Dashboard] Players loaded:', players.length);
+                document.getElementById('total-players').textContent = players.length;
+            } else {
+                console.error('[Dashboard] Players API failed:', playersRes.status);
+                document.getElementById('total-players').textContent = '?';
+            }
+            
+            if (matchesRes.ok) {
+                const matches = await matchesRes.json();
+                console.log('[Dashboard] Matches loaded:', matches.length);
+                document.getElementById('total-matches').textContent = matches.length;
+            } else {
+                console.error('[Dashboard] Matches API failed:', matchesRes.status);
+                document.getElementById('total-matches').textContent = '?';
+            }
+            
+            if (sessionsRes.ok) {
+                const sessions = await sessionsRes.json();
+                console.log('[Dashboard] Sessions loaded:', sessions.length);
+                document.getElementById('total-sessions').textContent = sessions.length;
+                await loadLastSessions(sessions);
+            } else {
+                console.error('[Dashboard] Sessions API failed:', sessionsRes.status);
+                document.getElementById('total-sessions').textContent = '?';
+            }
+        } catch (error) {
+            console.error('[Dashboard] Failed to load lobby stats:', error);
+            document.getElementById('total-players').textContent = '!';
+            document.getElementById('total-matches').textContent = '!';
+            document.getElementById('total-sessions').textContent = '!';
+        }
+    }
+    
+    async function loadMonthlyEarnings() {
+        const currentMonthListEl = document.getElementById('currentMonthList');
+        const lastMonthListEl = document.getElementById('lastMonthList');
+        
+        try {
+            console.log('[Dashboard] Loading monthly earnings...');
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth() + 1;
+            
+            let prevYear = currentYear;
+            let prevMonth = currentMonth - 1;
+            if (prevMonth === 0) {
+                prevMonth = 12;
+                prevYear = currentYear - 1;
+            }
+            
+            const currentMonthName = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+            const prevMonthDate = new Date(prevYear, prevMonth - 1, 1);
+            const prevMonthName = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+            
+            document.getElementById('currentMonthHeader').textContent = currentMonthName;
+            document.getElementById('lastMonthHeader').textContent = prevMonthName;
+            
+            const [currentRes, prevRes] = await Promise.all([
+                fetch(`/badminton/api/earnings/monthly?year=${currentYear}&month=${currentMonth}`),
+                fetch(`/badminton/api/earnings/monthly?year=${prevYear}&month=${prevMonth}`)
+            ]);
+            
+            const renderMonthEarnings = (earnings) => {
+                if (!earnings || earnings.length === 0) {
+                    return '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">No stats data yet</div>';
+                }
+                
+                return earnings.map(player => {
+                    const earningsFormatted = formatEarnings(player.net_earnings);
+                    return `
+                        <div class="session-earnings-item">
+                            <span>${escapeHtml(player.player)} <span style="color: var(--text-muted); font-size: 0.8rem;">(${player.games_played})</span></span>
+                            <span class="${earningsFormatted.className}">${earningsFormatted.text}</span>
+                        </div>
+                    `;
+                }).join('');
+            };
+            
+            if (currentRes.ok) {
+                const currentEarnings = await currentRes.json();
+                console.log('[Dashboard] Current month earnings loaded:', currentEarnings.length);
+                currentMonthListEl.innerHTML = renderMonthEarnings(currentEarnings);
+            } else {
+                console.error('[Dashboard] Current month API failed:', currentRes.status);
+                currentMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Failed to load</div>';
+            }
+            
+            if (prevRes.ok) {
+                const prevEarnings = await prevRes.json();
+                console.log('[Dashboard] Previous month earnings loaded:', prevEarnings.length);
+                lastMonthListEl.innerHTML = renderMonthEarnings(prevEarnings);
+            } else {
+                console.error('[Dashboard] Previous month API failed:', prevRes.status);
+                lastMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Failed to load</div>';
+            }
+        } catch (error) {
+            console.error('[Dashboard] Failed to load monthly earnings:', error);
+            currentMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Error loading data</div>';
+            lastMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Error loading data</div>';
+        }
+    }
+    
+    async function loadLastSessions(sessions) {
+        const tbody = document.getElementById('quickRecapTableBody');
+        
+        try {
+            console.log('[Dashboard] Loading last sessions...');
+            const today = getTodayLocalDate();
+            const pastSessions = sessions.filter(s => s.date < today);
+            pastSessions.sort((a, b) => b.date.localeCompare(a.date));
+            const last5Sessions = pastSessions.slice(0, 5);
+            
+            if (last5Sessions.length === 0) {
+                console.log('[Dashboard] No past sessions found');
+                tbody.innerHTML = '<tr><td colspan="3" class="table-empty">No previous sessions found</td></tr>';
+                return;
+            }
+            
+            console.log('[Dashboard] Loading earnings for', last5Sessions.length, 'sessions');
+            const sessionDataPromises = last5Sessions.map(async session => {
+                try {
+                    const response = await fetch(`/badminton/api/sessions/${session.session_id}/earnings`);
+                    if (!response.ok) {
+                        console.error(`[Dashboard] Session ${session.session_id} earnings failed:`, response.status);
+                        return {
+                            session,
+                            players: []
+                        };
+                    }
+                    const earningsData = await response.json();
+                    return {
+                        session,
+                        players: earningsData.players || []
+                    };
+                } catch (err) {
+                    console.error(`[Dashboard] Error loading session ${session.session_id}:`, err);
+                    return {
+                        session,
+                        players: []
+                    };
+                }
+            });
+            
+            const sessionsData = await Promise.all(sessionDataPromises);
+            console.log('[Dashboard] Session earnings loaded for', sessionsData.length, 'sessions');
+            
+            const rowsHtml = sessionsData.map(({ session, players }) => {
+                players.sort((a, b) => b.net_earnings - a.net_earnings);
+                
+                const pillsHtml = players.map(p => {
+                    const earningsStr = formatSignedInt(p.net_earnings);
+                    let pillClass = 'player-pill--neutral';
+                    if (p.net_earnings > 0) {
+                        pillClass = 'player-pill--green';
+                    } else if (p.net_earnings < 0) {
+                        pillClass = 'player-pill--red';
+                    }
+                    
+                    return `<span class="player-pill ${pillClass}">${escapeHtml(p.player)} ${earningsStr}</span>`;
+                }).join('');
+                
+                const totalGames = session.match_count || 0;
+                const numberOfPlayers = players.length;
+                const totalGamesPlayed = players.reduce((sum, p) => sum + (p.games_played || 0), 0);
+                const playerAverage = numberOfPlayers > 0 ? Math.round(totalGamesPlayed / numberOfPlayers) : 0;
+                const gamesDisplay = `${playerAverage} \u2022 ${totalGames}`;
+                
+                return `
+                    <tr>
+                        <td>${formatDateDesign(session.date)}</td>
+                        <td>
+                            <div class="player-pills-container">
+                                ${pillsHtml || '<span style="color: var(--text-muted);">No player data</span>'}
+                            </div>
+                        </td>
+                        <td style="text-align: center;">${gamesDisplay}</td>
+                    </tr>
+                `;
+            }).join('');
+            
+            tbody.innerHTML = rowsHtml;
+        } catch (error) {
+            console.error('Failed to load last sessions:', error);
+            tbody.innerHTML = '<tr><td colspan="3" class="table-empty">Unable to load sessions</td></tr>';
+        }
+    }
+    
+    async function loadLeaderboard() {
+        try {
+            const response = await fetch('/badminton/api/players/stats');
+            if (response.ok) {
+                const players = await response.json();
+                const container = document.getElementById('leaderboard');
+                
+                // Filter players with at least 1 match
+                const activePlayers = players.filter(p => p.total_matches > 0);
+                
+                // Sort by MMR descending
+                activePlayers.sort((a, b) => b.mmr - a.mmr);
+                
+                container.innerHTML = activePlayers.map((p, i) => `
+                    <div class="leaderboard-item">
+                        <div class="leaderboard-rank">#${i + 1}</div>
+                        <div class="leaderboard-name">${escapeHtml(p.username)}</div>
+                        <div class="leaderboard-mmr">${p.mmr.toFixed(0)}</div>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            console.error('Failed to load leaderboard:', error);
+        }
+    }
+    
+    // Load all data on page load sequentially to avoid race conditions
+    async function loadAllDashboardData() {
+        try {
+            console.log('[Dashboard] Starting data load...');
+            await loadLobbyStats();
+            console.log('[Dashboard] Lobby stats complete');
+            await loadMonthlyEarnings();
+            console.log('[Dashboard] Monthly earnings complete');
+            await loadLeaderboard();
+            console.log('[Dashboard] Leaderboard complete');
+            console.log('[Dashboard] All data loaded successfully');
+        } catch (error) {
+            console.error('[Dashboard] Error loading dashboard data:', error);
+        }
+    }
+    
+    loadAllDashboardData();
+</script>
+{% endblock %}

@@ -1,5 +1,26 @@
 // ==================== Utility Functions ====================
 
+// Global user state
+let currentUserRole = 'player'; // Default to player, will be updated on page load
+
+// Check if current user is admin
+function isAdmin() {
+    return currentUserRole === 'admin';
+}
+
+// Load current user info and set role
+async function loadCurrentUser() {
+    try {
+        const authStatus = await api('./api/auth/status');
+        if (authStatus.authenticated && authStatus.user) {
+            currentUserRole = authStatus.user.role || 'player';
+            console.log('Current user role:', currentUserRole);
+        }
+    } catch (error) {
+        console.error('Failed to load user info:', error);
+    }
+}
+
 // API call wrapper
 async function api(url, options = {}) {
     console.log(`API: Fetching ${url}...`);
@@ -165,6 +186,7 @@ function formatDateDesign(dateStr) {
 // ==================== Dashboard Page ====================
 
 async function initDashboard() {
+    console.log('Dashboard v2.0 - Initializing with separate month cards');
     await loadDashboardStats();
     await loadMonthlyEarnings();
 }
@@ -191,99 +213,138 @@ async function loadDashboardStats() {
 }
 
 async function loadMonthlyEarnings() {
+    console.log('loadMonthlyEarnings: Starting...');
     try {
-        // Get current month name
+        // Get current month and previous month
         const now = new Date();
-        const monthName = now.toLocaleString('en-US', { month: 'long' });
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1; // 1-12
         
-        // Update header with month name - changed to "Stats"
-        const header = qs('#monthlyEarningsHeader');
-        if (header) {
-            header.textContent = `${monthName} Stats`;
+        // Calculate previous month
+        let prevYear = currentYear;
+        let prevMonth = currentMonth - 1;
+        if (prevMonth === 0) {
+            prevMonth = 12;
+            prevYear = currentYear - 1;
         }
         
-        // Get earnings data, players data, and monthly matches for MMR calculation
-        const [earnings, players, stats] = await Promise.all([
-            api('./api/earnings/monthly'),
+        console.log(`loadMonthlyEarnings: Current month: ${currentYear}-${currentMonth}, Previous month: ${prevYear}-${prevMonth}`);
+        
+        // Get month names
+        const currentMonthName = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        const prevMonthDate = new Date(prevYear, prevMonth - 1, 1);
+        const prevMonthName = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        
+        console.log(`loadMonthlyEarnings: Month names: ${currentMonthName}, ${prevMonthName}`);
+        
+        // Update headers
+        const currentHeader = qs('#currentMonthHeader');
+        const lastHeader = qs('#lastMonthHeader');
+        console.log(`loadMonthlyEarnings: Headers found: current=${!!currentHeader}, last=${!!lastHeader}`);
+        if (currentHeader) {
+            currentHeader.textContent = currentMonthName;
+        }
+        if (lastHeader) {
+            lastHeader.textContent = prevMonthName;
+        }
+        
+        // Fetch both months' data in parallel
+        console.log('loadMonthlyEarnings: Fetching data...');
+        const [currentEarnings, prevEarnings, players, stats, currentMMRChanges, prevMMRChanges] = await Promise.all([
+            api(`./api/earnings/monthly?year=${currentYear}&month=${currentMonth}`),
+            api(`./api/earnings/monthly?year=${prevYear}&month=${prevMonth}`),
             api('./api/players'),
-            api('./api/stats')
+            api('./api/stats'),
+            api(`./api/mmr/monthly?year=${currentYear}&month=${currentMonth}`),
+            api(`./api/mmr/monthly?year=${prevYear}&month=${prevMonth}`)
         ]);
         
-        const container = qs('#monthlyEarningsList');
+        console.log('loadMonthlyEarnings: Data fetched:', {
+            currentEarnings: currentEarnings.length,
+            prevEarnings: prevEarnings.length,
+            players: players.length
+        });
         
-        if (!container) {
-            console.error('Monthly earnings container not found');
+        const currentContainer = qs('#currentMonthList');
+        const lastContainer = qs('#lastMonthList');
+        
+        console.log(`loadMonthlyEarnings: Containers found: current=${!!currentContainer}, last=${!!lastContainer}`);
+        
+        if (!currentContainer || !lastContainer) {
+            console.error('Monthly earnings containers not found');
             return;
         }
         
-        if (earnings.length === 0) {
-            container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">No stats data yet</div>';
-            return;
-        }
-        
-        // Create MMR lookup map and calculate MMR changes
+        // Create MMR lookup map
         const mmrMap = {};
-        const statsMap = {};
-        
         players.forEach(p => {
             const name = typeof p === 'string' ? p : p.name;
             const mmr = (typeof p === 'object' && p.mmr) ? p.mmr : 1500;
             mmrMap[name] = mmr;
         });
         
-        stats.forEach(s => {
-            statsMap[s.player] = {
-                totalMatches: s.total_matches || 0,
-                mmr: s.mmr || 1500
-            };
-        });
+        // Helper function to process earnings data
+        const processEarnings = (earnings, mmrChanges) => {
+            return earnings.map(player => {
+                const currentMMR = mmrMap[player.player] || 1500;
+                // Show MMR change for this specific month
+                const mmrChange = mmrChanges[player.player] || 0;
+                
+                return {
+                    ...player,
+                    currentMMR,
+                    mmrChange
+                };
+            });
+        };
         
-        // Calculate MMR change based on monthly performance
-        // For simplicity, we'll estimate based on win rate vs expected
-        const earningsWithMMR = earnings.map(player => {
-            const winRate = player.games_played > 0 ? (player.games_played - (player.total_losses || 0)) / player.games_played : 0.5;
-            const currentMMR = mmrMap[player.player] || 1500;
+        // Helper function to render month earnings
+        const renderMonthEarnings = (earnings, mmrChanges) => {
+            if (earnings.length === 0) {
+                return '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">No stats data yet</div>';
+            }
             
-            // Estimate MMR gained/lost: roughly 24 points per game * win_rate_diff * games
-            // Positive if winning more than 50%, negative if less
-            const expectedWinRate = 0.5;
-            const mmrChange = Math.round((winRate - expectedWinRate) * 24 * player.games_played);
+            const earningsWithMMR = processEarnings(earnings, mmrChanges);
+            const earningsHtml = earningsWithMMR.map(player => {
+                const earningsFormatted = formatEarnings(player.net_earnings);
+                const mmrChangeClass = player.mmrChange > 0 ? 'text-success' : (player.mmrChange < 0 ? 'text-danger' : 'text-muted');
+                const mmrChangeSign = player.mmrChange > 0 ? '+' : '';
+                const mmrChangeText = player.mmrChange !== 0 ? `${mmrChangeSign}${player.mmrChange}` : '—';
+                
+                return `
+                    <div class="earnings-item">
+                        <span class="earnings-player">
+                            <span class="mmr-badge">${Math.round(player.currentMMR)}</span>
+                            <span class="player-name-text">${escapeHtml(player.player)}</span>
+                            <span class="mmr-change ${mmrChangeClass}">${mmrChangeText}</span>
+                        </span>
+                        <span>
+                            <span class="earnings-amount ${earningsFormatted.className}">${earningsFormatted.text}</span>
+                            <span class="earnings-games">(${player.games_played})</span>
+                        </span>
+                    </div>
+                `;
+            }).join('');
             
-            return {
-                ...player,
-                currentMMR,
-                mmrChange
-            };
-        });
+            return earningsHtml;
+        };
         
-        // Build earnings display with MMR change
-        const earningsHtml = earningsWithMMR.map(player => {
-            const earningsFormatted = formatEarnings(player.net_earnings);
-            const mmrChangeClass = player.mmrChange > 0 ? 'text-success' : (player.mmrChange < 0 ? 'text-danger' : 'text-muted');
-            const mmrChangeSign = player.mmrChange > 0 ? '+' : '';
-            const mmrChangeText = player.mmrChange !== 0 ? `${mmrChangeSign}${player.mmrChange}` : '—';
-            
-            return `
-                <div class="earnings-item">
-                    <span class="earnings-player">
-                        <span class="mmr-badge">${Math.round(player.currentMMR)}</span>
-                        <span class="player-name-text">${escapeHtml(player.player)}</span>
-                        <span class="mmr-change ${mmrChangeClass}">${mmrChangeText}</span>
-                    </span>
-                    <span>
-                        <span class="earnings-amount ${earningsFormatted.className}">${earningsFormatted.text}</span>
-                        <span class="earnings-games">(${player.games_played})</span>
-                    </span>
-                </div>
-            `;
-        }).join('');
-        
-        container.innerHTML = earningsHtml;
+        // Render both months into separate containers
+        console.log('loadMonthlyEarnings: Rendering...');
+        currentContainer.innerHTML = renderMonthEarnings(currentEarnings, currentMMRChanges);
+        lastContainer.innerHTML = renderMonthEarnings(prevEarnings, prevMMRChanges);
+        console.log('loadMonthlyEarnings: Complete!');
     } catch (error) {
-        console.error('Failed to load monthly earnings:', error);
-        const container = qs('#monthlyEarningsList');
-        if (container) {
-            container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">Unable to load stats</div>';
+        console.error('loadMonthlyEarnings: ERROR:', error);
+        console.error('loadMonthlyEarnings: Error stack:', error.stack);
+        const currentContainer = qs('#currentMonthList');
+        const lastContainer = qs('#lastMonthList');
+        const errorMsg = '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">Unable to load stats</div>';
+        if (currentContainer) {
+            currentContainer.innerHTML = errorMsg;
+        }
+        if (lastContainer) {
+            lastContainer.innerHTML = errorMsg;
         }
     }
 }
@@ -431,6 +492,7 @@ async function loadQuickRecap(sessions) {
 // ==================== Players Page ====================
 
 async function initPlayers() {
+    await loadCurrentUser();
     await loadPlayers();
     
     // Add player form
@@ -463,9 +525,17 @@ async function loadPlayers() {
     try {
         const players = await api('./api/players');
         const tbody = qs('#playersTableBody');
+        const actionsHeader = qs('#playersActionsHeader');
+        
+        // Hide actions column if not admin
+        if (actionsHeader) {
+            actionsHeader.style.display = isAdmin() ? '' : 'none';
+        }
+        
+        const colspanCount = isAdmin() ? 3 : 2;
         
         if (players.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="table-empty">No players added yet</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No players added yet</td></tr>`;
             return;
         }
         
@@ -480,15 +550,21 @@ async function loadPlayers() {
             // Handle both old string format and new object format
             const playerName = typeof player === 'string' ? player : player.name;
             const mmr = (typeof player === 'object' && player.mmr) ? player.mmr : 1500;
+            
+            // Only show actions column if user is admin
+            const actionsColumn = isAdmin() 
+                ? `<td style="text-align: right;">
+                       <button class="btn btn-danger btn-small" onclick="deletePlayer('${escapeHtml(playerName)}')">
+                           Delete
+                       </button>
+                   </td>`
+                : '';
+            
             return `
                 <tr>
                     <td>${escapeHtml(playerName)}</td>
                     <td style="text-align: center;">${mmr}</td>
-                    <td style="text-align: right;">
-                        <button class="btn btn-danger btn-small" onclick="deletePlayer('${escapeHtml(playerName)}')">
-                            Delete
-                        </button>
-                    </td>
+                    ${actionsColumn}
                 </tr>
             `;
         }).join('');
@@ -534,6 +610,19 @@ let currentCourts = []; // [{court:1, team_a:[...], team_b:[...]}, ...]
 let currentRecommendedIds = []; // 4 or 8 player names in court order
 let activePlayersCount = 0; // Track active player count
 
+// 2v2 mode state
+let mode2v2 = false; // false = Free For All, true = 2v2
+let teamsLocked = false; // Lock state for 2v2 mode
+let lockedTeams = []; // [[player1, player2], [player3, player4], ...] - teams in 2v2 mode
+let teamMatchupIndex = 0; // Current index in the matchup rotation
+let teamMatchups = []; // All possible matchups for locked teams
+
+// LocalStorage keys
+const STORAGE_KEY_MODE = 'badminton_mode_2v2';
+const STORAGE_KEY_SELECTED = 'badminton_selected_players';
+const STORAGE_KEY_LOCKED = 'badminton_teams_locked';
+const STORAGE_KEY_LOCKED_TEAMS = 'badminton_locked_teams';
+
 async function initMatchups() {
     try {
         console.log('Starting matchups page initialization...');
@@ -551,6 +640,12 @@ async function initMatchups() {
         await loadPlayersForMatchups();
         console.log('Players loaded');
         
+        // Restore saved state after players are loaded
+        console.log('Restoring saved state...');
+        restoreState();
+        applyRestoredState();
+        console.log('State restored');
+        
         console.log('Loading match history...');
         await loadMatchHistory();
         console.log('Match history loaded');
@@ -562,6 +657,10 @@ async function initMatchups() {
         console.log('Loading player earnings...');
         await loadPlayerEarnings();
         console.log('Player earnings loaded');
+        
+        console.log('Loading queue data (initial)...');
+        await loadQueueData();
+        console.log('Queue data loaded');
         
         // Set up bet button handlers
         const betButtons = qsa('.btn-bet');
@@ -637,6 +736,13 @@ async function initMatchups() {
             console.log('activePlayersCount:', activePlayersCount);
             console.log('allRecommendations:', allRecommendations);
             
+            // In 2v2 locked mode, cycle through team matchups
+            if (mode2v2 && teamsLocked && lockedTeams.length >= 2) {
+                console.log('2v2 locked mode - cycling team matchups');
+                cycle2v2LockedTeams();
+                return;
+            }
+            
             // If no players selected, pick the current recommended matchup
             if (selectedPlayers.length === 0) {
                 console.log('No players selected, setting recommended matchup');
@@ -672,6 +778,20 @@ async function initMatchups() {
             clearBtn.addEventListener('click', clearSelectedPlayers);
         }
         
+        // Set up mode selection handlers
+        const btnModeFFA = qs('#btn-mode-ffa');
+        const btnMode2v2 = qs('#btn-mode-2v2');
+        if (btnModeFFA && btnMode2v2) {
+            btnModeFFA.addEventListener('click', () => switchMode(false));
+            btnMode2v2.addEventListener('click', () => switchMode(true));
+        }
+        
+        // Set up lock toggle handler
+        const btnLockToggle = qs('#btn-lock-toggle');
+        if (btnLockToggle) {
+            btnLockToggle.addEventListener('click', toggleTeamsLock);
+        }
+        
         // Set up resize handler to re-render match history on breakpoint change
         let lastIsMobile = window.matchMedia('(max-width: 768px)').matches;
         let resizeTimeout = null;
@@ -700,10 +820,11 @@ async function loadPlayersForMatchups() {
         allPlayers = await api('./api/players');
         console.log('loadPlayersForMatchups: Got players:', allPlayers);
         
-        // Count active players for dual-court mode
+        // Count active players for dual-court mode (exclude deactivated)
         activePlayersCount = allPlayers.filter(p => {
             const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
-            return isActive;
+            const isDeactivated = typeof p === 'object' && p.deactivated === true;
+            return isActive && !isDeactivated;
         }).length;
         console.log('loadPlayersForMatchups: Active players count:', activePlayersCount);
         
@@ -750,8 +871,19 @@ function renderPlayers() {
     const container = qs('#playerToggles');
     if (!container) return;
     
-    // Sort players: active first, then alphabetically
-    const sortedPlayers = [...allPlayers].sort((a, b) => {
+    // Filter out deactivated players from main view
+    const visiblePlayers = allPlayers.filter(p => {
+        const isDeactivated = typeof p === 'object' && p.deactivated === true;
+        return !isDeactivated;
+    });
+    
+    // Get deactivated players for + button
+    const deactivatedPlayers = allPlayers.filter(p => {
+        return typeof p === 'object' && p.deactivated === true;
+    });
+    
+    // Sort visible players: active first, then alphabetically
+    const sortedPlayers = [...visiblePlayers].sort((a, b) => {
         const aActive = a.active !== undefined ? a.active : true;
         const bActive = b.active !== undefined ? b.active : true;
         
@@ -764,8 +896,9 @@ function renderPlayers() {
         return aName.localeCompare(bName);
     });
     
-    // Set grid columns based on player count
-    if (sortedPlayers.length <= 9) {
+    // Set grid columns based on visible player count (including + button if deactivated exist)
+    const totalItems = sortedPlayers.length + (deactivatedPlayers.length > 0 ? 1 : 0);
+    if (totalItems <= 9) {
         container.classList.remove('player-toggle-grid--4col');
         container.classList.add('player-toggle-grid--3col');
     } else {
@@ -774,13 +907,13 @@ function renderPlayers() {
     }
     
     // Render player items with two buttons
-    container.innerHTML = sortedPlayers.map(player => {
+    const playersHtml = sortedPlayers.map(player => {
         const playerName = typeof player === 'string' ? player : player.name;
         const isActive = typeof player === 'string' ? true : (player.active !== undefined ? player.active : true);
         const toggleIcon = isActive ? '✓' : 'X';
-        const containerClass = isActive ? 'player-item' : 'player-item is-deactivated';
+        const containerClass = isActive ? 'player-item' : 'player-item is-inactive';
         const disabledAttr = isActive ? '' : 'disabled';
-        const ariaLabel = isActive ? `Deactivate ${playerName}` : `Activate ${playerName}`;
+        const ariaLabel = isActive ? `Click to toggle, hold to remove` : `Click to activate`;
         const ariaPressed = isActive ? 'false' : 'true';
         
         return `
@@ -808,6 +941,23 @@ function renderPlayers() {
         `;
     }).join('');
     
+    // Add + button if there are deactivated players
+    const plusButtonHtml = deactivatedPlayers.length > 0 ? `
+        <div class="player-item player-item--add-btn">
+            <button 
+                type="button" 
+                class="player-add-btn" 
+                id="btn-show-deactivated"
+                aria-label="Show deactivated players"
+                title="Show deactivated players (${deactivatedPlayers.length})"
+            >
+                +
+            </button>
+        </div>
+    ` : '';
+    
+    container.innerHTML = playersHtml + plusButtonHtml;
+    
     // Add click handlers for name buttons
     qsa('.player-name-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -817,10 +967,71 @@ function renderPlayers() {
         });
     });
     
-    // Add click handlers for toggle buttons
+    // Add press-and-hold handlers for toggle buttons
     qsa('.player-toggle-btn').forEach(btn => {
-        btn.addEventListener('click', () => togglePlayerActive(btn.dataset.player));
+        let holdTimer = null;
+        let holdStartTime = 0;
+        const HOLD_DURATION = 1500; // 1.5 seconds
+        
+        // Mouse/touch start
+        const startHold = (e) => {
+            // Only apply hold behavior if button is not disabled (inactive players)
+            if (btn.disabled) return;
+            
+            holdStartTime = Date.now();
+            btn.classList.add('holding');
+            
+            // Set CSS variable for animation duration
+            btn.style.setProperty('--hold-duration', `${HOLD_DURATION}ms`);
+            
+            holdTimer = setTimeout(() => {
+                // Deactivate player after hold duration
+                btn.classList.remove('holding');
+                btn.classList.add('hold-complete');
+                deactivatePlayer(btn.dataset.player);
+                
+                // Reset after a brief moment
+                setTimeout(() => {
+                    btn.classList.remove('hold-complete');
+                }, 300);
+            }, HOLD_DURATION);
+        };
+        
+        // Mouse/touch end or leave
+        const endHold = (e) => {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+            
+            const holdDuration = Date.now() - holdStartTime;
+            btn.classList.remove('holding');
+            
+            // If released before hold duration, treat as regular click
+            if (holdDuration < HOLD_DURATION && holdDuration > 0) {
+                togglePlayerActive(btn.dataset.player);
+            }
+            
+            holdStartTime = 0;
+        };
+        
+        // Add event listeners for both mouse and touch
+        btn.addEventListener('mousedown', startHold);
+        btn.addEventListener('mouseup', endHold);
+        btn.addEventListener('mouseleave', endHold);
+        btn.addEventListener('touchstart', startHold, { passive: true });
+        btn.addEventListener('touchend', endHold);
+        btn.addEventListener('touchcancel', endHold);
+        
+        // Prevent context menu on long press
+        btn.addEventListener('contextmenu', (e) => e.preventDefault());
     });
+    
+    // Add click handler for + button
+    const addBtn = qs('#btn-show-deactivated');
+    if (addBtn) {
+        addBtn.addEventListener('click', toggleDeactivatedDropdown);
+    }
 }
 
 // Toggle player selection (name button click)
@@ -828,8 +1039,20 @@ function togglePlayerSelection(btn) {
     const player = btn.dataset.player;
     const isSelected = selectedPlayers.includes(player);
     
-    // Determine max selections based on active player count
-    const maxSelected = activePlayersCount >= 8 ? 8 : 4;
+    // In 2v2 locked mode, don't allow selection changes
+    if (mode2v2 && teamsLocked) {
+        return;
+    }
+    
+    // Determine max selections based on mode
+    let maxSelected;
+    if (mode2v2) {
+        // In 2v2 mode, can select up to 8 players (4 teams of 2)
+        maxSelected = 8;
+    } else {
+        // In Free For All mode, use existing logic
+        maxSelected = activePlayersCount >= 8 ? 8 : 4;
+    }
     
     if (isSelected) {
         // Deselect
@@ -842,19 +1065,391 @@ function togglePlayerSelection(btn) {
             selectedPlayers.push(player);
             btn.classList.add('selected');
             btn.setAttribute('aria-pressed', 'true');
+            
+            // On mobile, blur immediately to prevent focus styles
+            if (window.innerWidth <= 768) {
+                btn.blur();
+            }
         }
     }
     
-    // Apply court watermarks based on selection order
-    applyCourtWatermarksToSelection();
+    // Apply court watermarks based on selection order (FFA mode only)
+    if (!mode2v2) {
+        applyCourtWatermarksToSelection();
+    } else {
+        // In 2v2 mode, remove all court watermarks
+        qsa('.player-name-btn').forEach(btn => {
+            btn.classList.remove('court-1', 'court-2');
+        });
+    }
     
     // Update disabled states and clear button
     updatePlayerButtonStates();
     
-    // Update team colors
+    // Update team colors (different logic for 2v2)
+    updateTeamColors();
+    updateTeamPreview();
+    updateLockButtonVisibility();
+    
+    // Clear or show recommendation explanation based on mode
+    updateRecommendationExplanation();
+    
+    // Save state
+    saveState();
+    
+    validateForm();
+}
+
+// Switch between Free For All and 2v2 mode
+function switchMode(to2v2) {
+    // Don't switch if already in that mode
+    if (mode2v2 === to2v2) return;
+    
+    // Update mode state
+    mode2v2 = to2v2;
+    teamsLocked = false;
+    lockedTeams = [];
+    teamMatchups = [];
+    teamMatchupIndex = 0;
+    
+    // Update UI
+    const btnModeFFA = qs('#btn-mode-ffa');
+    const btnMode2v2 = qs('#btn-mode-2v2');
+    const lockBtn = qs('#btn-lock-toggle');
+    const lockIcon = qs('#lock-icon');
+    
+    if (to2v2) {
+        btnMode2v2?.classList.add('active');
+        btnModeFFA?.classList.remove('active');
+    } else {
+        btnModeFFA?.classList.add('active');
+        btnMode2v2?.classList.remove('active');
+    }
+    
+    // Reset lock button state
+    if (lockIcon) lockIcon.textContent = '🔓';
+    lockBtn?.classList.remove('locked');
+    lockBtn?.style.setProperty('display', 'none');
+    
+    // Clear all selections and reset player button states
+    selectedPlayers = [];
+    
+    qsa('.player-name-btn').forEach(btn => {
+        // Remove all selection and team classes
+        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'locked-inactive');
+        btn.setAttribute('aria-pressed', 'false');
+        btn.removeAttribute('data-temp-disabled');
+        
+        // Re-enable based on player active status
+        const playerName = btn.dataset.player;
+        const player = allPlayers.find(p => {
+            const name = typeof p === 'string' ? p : p.name;
+            return name === playerName;
+        });
+        const isActive = typeof player === 'string' ? true : (player?.active !== undefined ? player.active : true);
+        const isDeactivated = typeof player === 'object' && player.deactivated === true;
+        btn.disabled = !isActive || isDeactivated;
+    });
+    
+    // Update UI states
+    updatePlayerButtonStates();
+    updateTeamPreview();
+    updateLockButtonVisibility();
+    updateRecommendationExplanation();
+    validateForm();
+    
+    // Save state
+    saveState();
+    
+    toast(`Mode switched to ${to2v2 ? '2v2' : 'Free For All'}`);
+}
+
+// Update recommendation explanation based on mode
+function updateRecommendationExplanation() {
+    const explanationEl = qs('#recommendation-explanation');
+    if (!explanationEl) return;
+    
+    if (mode2v2) {
+        // Clear explanation in 2v2 mode
+        explanationEl.textContent = '';
+        explanationEl.style.display = 'none';
+    } else {
+        // Show explanation in Free For All mode
+        explanationEl.style.display = 'block';
+        // The actual text will be set by displayRecommendation or other functions
+    }
+}
+
+// Save current state to localStorage
+function saveState() {
+    try {
+        localStorage.setItem(STORAGE_KEY_MODE, mode2v2 ? '1' : '0');
+        localStorage.setItem(STORAGE_KEY_SELECTED, JSON.stringify(selectedPlayers));
+        localStorage.setItem(STORAGE_KEY_LOCKED, teamsLocked ? '1' : '0');
+        localStorage.setItem(STORAGE_KEY_LOCKED_TEAMS, JSON.stringify(lockedTeams));
+    } catch (e) {
+        console.warn('Failed to save state to localStorage:', e);
+    }
+}
+
+// Restore state from localStorage
+function restoreState() {
+    try {
+        // Restore mode
+        const savedMode = localStorage.getItem(STORAGE_KEY_MODE);
+        if (savedMode !== null) {
+            mode2v2 = savedMode === '1';
+        }
+        
+        // Restore selected players
+        const savedSelected = localStorage.getItem(STORAGE_KEY_SELECTED);
+        if (savedSelected) {
+            selectedPlayers = JSON.parse(savedSelected);
+        }
+        
+        // Restore lock state
+        const savedLocked = localStorage.getItem(STORAGE_KEY_LOCKED);
+        if (savedLocked !== null) {
+            teamsLocked = savedLocked === '1';
+        }
+        
+        // Restore locked teams
+        const savedLockedTeams = localStorage.getItem(STORAGE_KEY_LOCKED_TEAMS);
+        if (savedLockedTeams) {
+            lockedTeams = JSON.parse(savedLockedTeams);
+        }
+        
+        return true;
+    } catch (e) {
+        console.warn('Failed to restore state from localStorage:', e);
+        return false;
+    }
+}
+
+// Apply restored state to UI
+function applyRestoredState() {
+    // Update mode buttons
+    const btnModeFFA = qs('#btn-mode-ffa');
+    const btnMode2v2 = qs('#btn-mode-2v2');
+    
+    if (mode2v2) {
+        btnMode2v2?.classList.add('active');
+        btnModeFFA?.classList.remove('active');
+    } else {
+        btnModeFFA?.classList.add('active');
+        btnMode2v2?.classList.remove('active');
+    }
+    
+    // Apply selection to player buttons
+    selectedPlayers.forEach((player, index) => {
+        const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+        if (btn) {
+            btn.classList.add('selected');
+            btn.setAttribute('aria-pressed', 'true');
+        }
+    });
+    
+    // Apply lock state if locked
+    if (teamsLocked && lockedTeams.length >= 2) {
+        const lockBtn = qs('#btn-lock-toggle');
+        const lockIcon = qs('#lock-icon');
+        
+        if (lockIcon) lockIcon.textContent = '🔒';
+        lockBtn?.classList.add('locked');
+        
+        // Generate matchups for locked teams
+        teamMatchups = generateTeamMatchups(lockedTeams);
+        teamMatchupIndex = 0;
+        
+        // Disable and apply locked-inactive class
+        qsa('.player-name-btn').forEach(btn => {
+            btn.disabled = true;
+            const playerName = btn.dataset.player;
+            if (!selectedPlayers.includes(playerName)) {
+                btn.classList.add('locked-inactive');
+            }
+        });
+    }
+    
+    // Update team colors and preview
+    updateTeamColors();
+    updateTeamPreview();
+    updateLockButtonVisibility();
+    updateRecommendationExplanation();
+    updatePlayerButtonStates();
+    validateForm();
+}
+
+// Toggle teams lock in 2v2 mode
+function toggleTeamsLock() {
+    if (!mode2v2) return;
+    
+    teamsLocked = !teamsLocked;
+    
+    // Update lock button UI
+    const lockIcon = qs('#lock-icon');
+    const lockBtn = qs('#btn-lock-toggle');
+    
+    if (teamsLocked) {
+        if (lockIcon) lockIcon.textContent = '🔒';
+        lockBtn?.classList.add('locked');
+        
+        // Build locked teams from current selection
+        lockedTeams = [];
+        for (let i = 0; i < selectedPlayers.length; i += 2) {
+            if (i + 1 < selectedPlayers.length) {
+                lockedTeams.push([selectedPlayers[i], selectedPlayers[i + 1]]);
+            }
+        }
+        
+        // Generate all possible matchups for these locked teams
+        teamMatchups = generateTeamMatchups(lockedTeams);
+        teamMatchupIndex = 0;
+        
+        // Disable player buttons when locked and add locked-inactive class to non-selected
+        qsa('.player-name-btn').forEach(btn => {
+            btn.disabled = true;
+            const playerName = btn.dataset.player;
+            if (!selectedPlayers.includes(playerName)) {
+                btn.classList.add('locked-inactive');
+            }
+        });
+        
+        // Save state
+        saveState();
+        
+        toast('Teams locked');
+    } else {
+        if (lockIcon) lockIcon.textContent = '🔓';
+        lockBtn?.classList.remove('locked');
+        
+        // Clear matchup generation
+        teamMatchups = [];
+        teamMatchupIndex = 0;
+        
+        // Re-enable player buttons when unlocked (except inactive) and remove locked-inactive class
+        qsa('.player-name-btn').forEach(btn => {
+            btn.classList.remove('locked-inactive');
+            const playerName = btn.dataset.player;
+            const player = allPlayers.find(p => {
+                const name = typeof p === 'string' ? p : p.name;
+                return name === playerName;
+            });
+            const isActive = typeof player === 'string' ? true : (player?.active !== undefined ? player.active : true);
+            btn.disabled = !isActive;
+        });
+        
+        // Save state
+        saveState();
+        
+        toast('Teams unlocked');
+    }
+}
+
+// Update visibility of lock button based on mode and selection
+function updateLockButtonVisibility() {
+    const lockBtn = qs('#btn-lock-toggle');
+    if (!lockBtn) return;
+    
+    // Show lock button in 2v2 mode when we have at least 2 complete teams (4+ players)
+    if (mode2v2 && selectedPlayers.length >= 4) {
+        lockBtn.style.display = 'inline-flex';
+    } else {
+        lockBtn.style.display = 'none';
+        // Reset lock state when hiding button
+        if (teamsLocked) {
+            teamsLocked = false;
+            const lockIcon = qs('#lock-icon');
+            if (lockIcon) lockIcon.textContent = '🔓';
+            lockBtn.classList.remove('locked');
+        }
+    }
+}
+
+// Generate all possible matchups for locked teams
+function generateTeamMatchups(teams) {
+    if (teams.length === 2) {
+        // Only one matchup possible: team 0 vs team 1
+        return [[teams[0], teams[1]]];
+    }
+    
+    if (teams.length === 3) {
+        // 3 teams: rotate which 2 teams play (third team sits out visually but stays selected)
+        // We keep all players selected but rotate the order for matchup variety
+        return [
+            [teams[0], teams[1], teams[2]], // Teams 0 vs 1 (on court), Team 2 selected but off-court
+            [teams[0], teams[2], teams[1]], // Teams 0 vs 2 (on court), Team 1 selected but off-court  
+            [teams[1], teams[2], teams[0]]  // Teams 1 vs 2 (on court), Team 0 selected but off-court
+        ];
+    }
+    
+    if (teams.length === 4) {
+        // 4 teams: 2 courts, each round has 2 matchups
+        // Generate all possible pairings (round-robin style)
+        return [
+            [teams[0], teams[1], teams[2], teams[3]], // Court 1: 0v1, Court 2: 2v3
+            [teams[0], teams[2], teams[1], teams[3]], // Court 1: 0v2, Court 2: 1v3
+            [teams[0], teams[3], teams[1], teams[2]]  // Court 1: 0v3, Court 2: 1v2
+        ];
+    }
+    
+    // Fallback: just return teams as-is
+    return [teams];
+}
+
+// Cycle through 2v2 matchups with locked teams
+function cycle2v2LockedTeams() {
+    if (lockedTeams.length < 2) {
+        toast('Need at least 2 teams to cycle matchups', 'error');
+        return;
+    }
+    
+    // Generate all matchups if not already done
+    if (teamMatchups.length === 0) {
+        teamMatchups = generateTeamMatchups(lockedTeams);
+        teamMatchupIndex = 0;
+    }
+    
+    // Move to next matchup (wrap around)
+    teamMatchupIndex = (teamMatchupIndex + 1) % teamMatchups.length;
+    
+    // Get current matchup
+    const currentMatchup = teamMatchups[teamMatchupIndex];
+    
+    // Rebuild selectedPlayers from current matchup
+    selectedPlayers = currentMatchup.flat();
+    
+    // Update UI to reflect new matchup
+    qsa('.player-name-btn').forEach(btn => {
+        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'locked-inactive', 'court-1', 'court-2');
+        btn.setAttribute('aria-pressed', 'false');
+    });
+    
+    // Re-select players in new order
+    selectedPlayers.forEach((player, index) => {
+        const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+        if (btn) {
+            btn.classList.add('selected');
+            btn.setAttribute('aria-pressed', 'true');
+        }
+    });
+    
+    // Re-apply locked-inactive class to non-selected players
+    qsa('.player-name-btn').forEach(btn => {
+        const playerName = btn.dataset.player;
+        if (!selectedPlayers.includes(playerName)) {
+            btn.classList.add('locked-inactive');
+        }
+    });
+    
+    // Update team colors and preview
     updateTeamColors();
     updateTeamPreview();
     validateForm();
+    
+    const matchupNum = teamMatchupIndex + 1;
+    const totalMatchups = teamMatchups.length;
+    toast(`Matchup ${matchupNum}/${totalMatchups}`);
 }
 
 // Apply court watermarks to selected players based on their order
@@ -883,7 +1478,217 @@ function togglePlayer(btn) {
     togglePlayerSelection(btn);
 }
 
-// Toggle player active/deactivated status (toggle button click)
+// Deactivate player (hide from main view)
+async function deactivatePlayer(playerName) {
+    console.log('deactivatePlayer called for:', playerName);
+    
+    // No confirmation needed - the press-and-hold is the confirmation
+    
+    // Find player in allPlayers
+    const player = allPlayers.find(p => {
+        const name = typeof p === 'string' ? p : p.name;
+        return name === playerName;
+    });
+    
+    if (!player) {
+        console.error('Player not found:', playerName);
+        return;
+    }
+    
+    // Update in-memory state
+    if (typeof player === 'object') {
+        player.deactivated = true;
+        player.active = false; // Also mark as inactive
+    }
+    
+    // If player is currently selected, remove from selection
+    if (selectedPlayers.includes(playerName)) {
+        console.log('Deactivated player was selected, removing from selection');
+        selectedPlayers = selectedPlayers.filter(p => p !== playerName);
+    }
+    
+    // Recalculate active players count
+    activePlayersCount = allPlayers.filter(p => {
+        const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
+        const isDeactivated = typeof p === 'object' && p.deactivated === true;
+        return isActive && !isDeactivated;
+    }).length;
+    console.log('Updated activePlayersCount:', activePlayersCount);
+    
+    // Re-render players
+    renderPlayers();
+    
+    // Update team preview and validation
+    updateTeamColors();
+    updateTeamPreview();
+    validateForm();
+    
+    // Persist to backend
+    try {
+        await api(`./api/players/${encodeURIComponent(playerName)}/deactivated`, {
+            method: 'PATCH',
+            body: JSON.stringify({ deactivated: true })
+        });
+        console.log('Player deactivated status saved successfully');
+        
+        // Reload recommendations since player pool changed
+        await loadRecommendations();
+        toast(`${playerName} removed from session`);
+    } catch (error) {
+        console.error('Failed to save player deactivated status:', error);
+        toast('Failed to update player status', 'error');
+        
+        // Revert state on error
+        if (typeof player === 'object') {
+            player.deactivated = false;
+        }
+        
+        // Re-render to show correct state
+        renderPlayers();
+        updateTeamColors();
+        updateTeamPreview();
+        validateForm();
+    }
+}
+
+// Reactivate player (restore to main view)
+async function reactivatePlayer(playerName) {
+    console.log('reactivatePlayer called for:', playerName);
+    
+    // Find player in allPlayers
+    const player = allPlayers.find(p => {
+        const name = typeof p === 'string' ? p : p.name;
+        return name === playerName;
+    });
+    
+    if (!player) {
+        console.error('Player not found:', playerName);
+        return;
+    }
+    
+    // Update in-memory state
+    if (typeof player === 'object') {
+        player.deactivated = false;
+        player.active = true; // Also mark as active
+    }
+    
+    // Recalculate active players count
+    activePlayersCount = allPlayers.filter(p => {
+        const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
+        const isDeactivated = typeof p === 'object' && p.deactivated === true;
+        return isActive && !isDeactivated;
+    }).length;
+    console.log('Updated activePlayersCount:', activePlayersCount);
+    
+    // Close dropdown
+    closeDeactivatedDropdown();
+    
+    // Re-render players
+    renderPlayers();
+    
+    // Update team preview and validation
+    updateTeamColors();
+    updateTeamPreview();
+    validateForm();
+    
+    // Persist to backend
+    try {
+        await api(`./api/players/${encodeURIComponent(playerName)}/deactivated`, {
+            method: 'PATCH',
+            body: JSON.stringify({ deactivated: false })
+        });
+        console.log('Player reactivated status saved successfully');
+        
+        // Reload recommendations since player pool changed
+        await loadRecommendations();
+        toast(`${playerName} added to session`);
+    } catch (error) {
+        console.error('Failed to save player reactivated status:', error);
+        toast('Failed to update player status', 'error');
+        
+        // Revert state on error
+        if (typeof player === 'object') {
+            player.deactivated = true;
+            player.active = false;
+        }
+        
+        // Re-render to show correct state
+        renderPlayers();
+        updateTeamColors();
+        updateTeamPreview();
+        validateForm();
+    }
+}
+
+// Toggle deactivated players dropdown
+function toggleDeactivatedDropdown() {
+    const existingDropdown = qs('#deactivated-dropdown');
+    
+    if (existingDropdown) {
+        closeDeactivatedDropdown();
+        return;
+    }
+    
+    // Get deactivated players
+    const deactivatedPlayers = allPlayers.filter(p => {
+        return typeof p === 'object' && p.deactivated === true;
+    });
+    
+    if (deactivatedPlayers.length === 0) {
+        return;
+    }
+    
+    // Create dropdown
+    const dropdown = document.createElement('div');
+    dropdown.id = 'deactivated-dropdown';
+    dropdown.className = 'deactivated-dropdown';
+    
+    // Sort deactivated players alphabetically
+    const sortedDeactivated = [...deactivatedPlayers].sort((a, b) => {
+        const aName = a.name;
+        const bName = b.name;
+        return aName.localeCompare(bName);
+    });
+    
+    dropdown.innerHTML = `
+        <div class="deactivated-dropdown-header">Deactivated Players</div>
+        <div class="deactivated-dropdown-list">
+            ${sortedDeactivated.map(p => `
+                <button 
+                    type="button" 
+                    class="deactivated-player-item" 
+                    data-player="${escapeHtml(p.name)}"
+                    onclick="reactivatePlayer('${escapeHtml(p.name).replace(/'/g, "\\'")}')">
+                    ${escapeHtml(p.name)}
+                </button>
+            `).join('')}
+        </div>
+    `;
+    
+    // Add to container (positioned after the + button)
+    const container = qs('#playerToggles');
+    if (container) {
+        container.appendChild(dropdown);
+        
+        // Add backdrop
+        const backdrop = document.createElement('div');
+        backdrop.id = 'deactivated-backdrop';
+        backdrop.className = 'deactivated-backdrop';
+        backdrop.addEventListener('click', closeDeactivatedDropdown);
+        document.body.appendChild(backdrop);
+    }
+}
+
+// Close deactivated players dropdown
+function closeDeactivatedDropdown() {
+    const dropdown = qs('#deactivated-dropdown');
+    const backdrop = qs('#deactivated-backdrop');
+    
+    if (dropdown) dropdown.remove();
+    if (backdrop) backdrop.remove();
+}
+
+// Toggle player active/inactive status (toggle button click)
 async function togglePlayerActive(playerName) {
     console.log('togglePlayerActive called for:', playerName);
     
@@ -916,10 +1721,11 @@ async function togglePlayerActive(playerName) {
         await ensureSelectionCount();
     }
     
-    // Recalculate active players count
+    // Recalculate active players count (exclude deactivated)
     activePlayersCount = allPlayers.filter(p => {
         const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
-        return isActive;
+        const isDeactivated = typeof p === 'object' && p.deactivated === true;
+        return isActive && !isDeactivated;
     }).length;
     console.log('Updated activePlayersCount:', activePlayersCount);
     
@@ -1052,19 +1858,30 @@ function updatePlayerButtonStates() {
         clearBtn.disabled = selectedPlayers.length === 0;
     }
     
-    // Determine max selections based on active player count
-    const maxSelected = activePlayersCount >= 8 ? 8 : 4;
+    // Determine max selections based on mode
+    let maxSelected;
+    if (mode2v2) {
+        // In 2v2 mode, can select up to 8 players (4 teams of 2)
+        maxSelected = 8;
+    } else {
+        // In Free For All mode, use existing logic
+        maxSelected = activePlayersCount >= 8 ? 8 : 4;
+    }
     
     // Update disabled states for player buttons (name buttons)
     // Inactive players are already disabled via renderPlayers()
-    if (selectedPlayers.length >= maxSelected) {
+    // Don't disable if teams are locked (handled separately)
+    if (!teamsLocked && selectedPlayers.length >= maxSelected) {
         qsa('.player-name-btn').forEach(b => {
-            if (!b.classList.contains('selected') && !b.disabled) {
+            // Check against selectedPlayers array instead of .selected class
+            // (since .selected class may be removed on mobile)
+            const isPlayerSelected = selectedPlayers.includes(b.dataset.player);
+            if (!isPlayerSelected && !b.disabled) {
                 b.disabled = true;
                 b.setAttribute('data-temp-disabled', 'true');
             }
         });
-    } else {
+    } else if (!teamsLocked) {
         qsa('.player-name-btn').forEach(b => {
             // Only re-enable if it was temporarily disabled (not permanently disabled due to inactive status)
             if (b.getAttribute('data-temp-disabled') === 'true') {
@@ -1094,7 +1911,7 @@ function clearSelectedPlayers() {
     
     // Clear selection from name buttons
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b');
+        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2');
         btn.setAttribute('aria-pressed', 'false');
         // Don't modify disabled state here - renderPlayers handles that
     });
@@ -1109,29 +1926,72 @@ function clearSelectedPlayers() {
     // Update UI
     updatePlayerButtonStates();
     updateTeamPreview();
+    updateLockButtonVisibility();
+    
+    // Save state
+    saveState();
+    
     validateForm();
 }
 
 function updateTeamColors() {
+    // On mobile, remove .selected class so team colors are visible
+    const isMobile = window.innerWidth <= 768;
+    
     // Remove all team classes first from name buttons
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('team-a', 'team-b');
-    });
-    
-    // Apply team colors based on selection order
-    // For each court: indices 0-1 (or 4-5) = Team A, indices 2-3 (or 6-7) = Team B
-    selectedPlayers.forEach((player, index) => {
-        const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-        if (btn) {
-            // Determine team based on position within court
-            const positionInCourt = index % 4;
-            if (positionInCourt < 2) {
-                btn.classList.add('team-a');
-            } else {
-                btn.classList.add('team-b');
-            }
+        btn.classList.remove('team-a', 'team-b', 'team-c', 'team-d');
+        
+        // On mobile, remove .selected from selected players so team colors show
+        if (isMobile && selectedPlayers.includes(btn.dataset.player)) {
+            btn.classList.remove('selected');
         }
     });
+    
+    if (mode2v2) {
+        // 2v2 mode: assign colors by pairs (teams)
+        // 1st & 2nd = Red (team-a)
+        // 3rd & 4th = Blue (team-b)
+        // 5th & 6th = Purple (team-c)
+        // 7th & 8th = Cyan (team-d)
+        selectedPlayers.forEach((player, index) => {
+            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+            if (btn) {
+                const teamIndex = Math.floor(index / 2);
+                switch (teamIndex) {
+                    case 0:
+                        btn.classList.add('team-a');
+                        break;
+                    case 1:
+                        btn.classList.add('team-b');
+                        break;
+                    case 2:
+                        btn.classList.add('team-c');
+                        break;
+                    case 3:
+                        btn.classList.add('team-d');
+                        break;
+                }
+            } else {
+                console.warn('Button not found for player in 2v2:', player, 'at index', index);
+            }
+        });
+    } else {
+        // Free For All mode: apply team colors based on selection order
+        // For each court: indices 0-1 (or 4-5) = Team A, indices 2-3 (or 6-7) = Team B
+        selectedPlayers.forEach((player, index) => {
+            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+            if (btn) {
+                // Determine team based on position within court
+                const positionInCourt = index % 4;
+                if (positionInCourt < 2) {
+                    btn.classList.add('team-a');
+                } else {
+                    btn.classList.add('team-b');
+                }
+            }
+        });
+    }
     
     // Legacy support for old single-button format
     qsa('.btn-player-toggle').forEach(btn => {
@@ -1444,9 +2304,15 @@ function setRecommendedMatchup() {
     selectedPlayers = [];
     
     // Clear from name buttons and remove court classes
+    // Also remove any temp-disabled attributes so all buttons are available for selection
     qsa('.player-name-btn').forEach(btn => {
         btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2');
         btn.setAttribute('aria-pressed', 'false');
+        // Remove temporary disabled state
+        if (btn.getAttribute('data-temp-disabled') === 'true') {
+            btn.disabled = false;
+            btn.removeAttribute('data-temp-disabled');
+        }
     });
     
     // Legacy support for old single-button format
@@ -1490,35 +2356,58 @@ function setRecommendedMatchup() {
         console.log('Selecting 4 players for single-court');
         const playersToSelect = [...currentRecommendation.teamA, ...currentRecommendation.teamB];
         console.log('Players to select:', playersToSelect);
+        console.log('Total players to select:', playersToSelect.length);
         
+        // First, add all players to the array
         playersToSelect.forEach((player, index) => {
+            console.log(`Adding player ${index + 1}/4:`, player);
             const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            if (btn && !btn.disabled) {
-                selectedPlayers.push(player);
-                btn.classList.add('selected');
-                btn.setAttribute('aria-pressed', 'true');
-                
-                // Add team color (0-1 = team A, 2-3 = team B)
-                if (index < 2) {
-                    btn.classList.add('team-a');
-                } else {
-                    btn.classList.add('team-b');
-                }
-            } else if (!btn) {
+            
+            if (!btn) {
                 console.error('Button not found for player:', player);
+                console.log('Available buttons:', Array.from(qsa('.player-name-btn')).map(b => b.dataset.player));
+                return;
             }
+            
+            if (btn.disabled) {
+                console.warn('Button is disabled for player:', player);
+                console.log('Button disabled attribute:', btn.getAttribute('disabled'));
+                console.log('Button has data-temp-disabled:', btn.getAttribute('data-temp-disabled'));
+                console.log('Currently selected players:', selectedPlayers);
+                console.log('Max selections:', mode2v2 ? 8 : (activePlayersCount >= 8 ? 8 : 4));
+                return;
+            }
+            
+            // Add to selection
+            selectedPlayers.push(player);
+            btn.classList.add('selected');
+            btn.setAttribute('aria-pressed', 'true');
+            
+            // Add team color (0-1 = team A, 2-3 = team B)
+            if (index < 2) {
+                btn.classList.add('team-a');
+            } else {
+                btn.classList.add('team-b');
+            }
+            
+            console.log(`Successfully selected player ${index + 1}:`, player);
         });
+        
+        console.log('Final selectedPlayers length:', selectedPlayers.length);
     } else {
         console.error('No recommendation available!');
     }
     
     console.log('Selected players:', selectedPlayers);
     
-    // Update UI
-    updatePlayerButtonStates();
+    // Update UI - NOTE: updatePlayerButtonStates() MUST come AFTER all players are added
+    // Otherwise it may disable buttons during the selection process
     applyCourtWatermarksToSelection();
     updateTeamColors();
+    updatePlayerButtonStates();  // Moved after updateTeamColors to ensure all selections are done
     updateTeamPreview();
+    updateLockButtonVisibility();
+    saveState();
     validateForm();
 }
 
@@ -1794,6 +2683,7 @@ async function handleRecordMatch() {
         await loadMatchHistory();
         await loadSessionStats();
         await loadPlayerEarnings();
+        await loadQueueData();
         await loadRecommendations();
         console.log('All done!');
     } catch (error) {
@@ -1905,12 +2795,25 @@ async function loadMatchHistory() {
         const sessionData = await api(`./api/sessions/${currentSession.session_id}`);
         const matches = sessionData.matches || [];
         const tbody = qs('#matchHistoryBody');
+        const actionsHeader = qs('#matchupsActionsHeader');
+        const emptyRow = qs('#matchHistoryEmptyRow');
+        
+        // Hide actions column if not admin
+        if (actionsHeader) {
+            actionsHeader.style.display = isAdmin() ? '' : 'none';
+        }
         
         // Update session display
         updateSessionDisplay();
         
+        const colspanCount = isAdmin() ? 6 : 5;
+        
         if (matches.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No matches in today\'s session yet</td></tr>';
+            // Update empty row colspan
+            if (emptyRow) {
+                const emptyCell = emptyRow.querySelector('td');
+                if (emptyCell) emptyCell.setAttribute('colspan', colspanCount);
+            }
             return;
         }
         
@@ -1952,11 +2855,11 @@ async function loadMatchHistory() {
                     <td class="col-score" style="text-align: center;">${scoreDisplay}</td>
                     <td class="${team2Class}">${renderTeam(match.team2)}</td>
                     <td class="col-bet" style="text-align: right;">${formatCurrency(match.game_value)}</td>
-                    <td class="col-action" style="text-align: center;">
+                    ${isAdmin() ? `<td class="col-action" style="text-align: center;">
                         <button class="btn btn-danger btn-small" onclick="deleteMatchFromHistory('${match.match_id}')" title="Delete match">
                             ×
                         </button>
-                    </td>
+                    </td>` : ''}
                 </tr>
             `;
         }).join('');
@@ -2105,6 +3008,113 @@ async function loadPlayerEarnings() {
     }
 }
 
+async function loadQueueData() {
+    try {
+        if (!currentSession || !currentSession.session_id) {
+            console.warn('loadQueueData: No current session');
+            return;
+        }
+        
+        // Get all active players
+        const activePlayers = allPlayers.filter(p => {
+            const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
+            return isActive;
+        }).map(p => typeof p === 'string' ? p : p.name);
+        
+        if (activePlayers.length < 2) {
+            qs('#queueTeammatesList').innerHTML = '<div style="color: var(--text-muted);">Need at least 2 active players</div>';
+            qs('#queueOpponentsList').innerHTML = '<div style="color: var(--text-muted);">Need at least 2 active players</div>';
+            return;
+        }
+        
+        // Get session stats to determine who has played together/against
+        const statsData = await api(`./api/sessions/${currentSession.session_id}/stats`);
+        
+        // Build sets of existing pairings
+        const existingTeammates = new Set();
+        const existingOpponents = new Set();
+        
+        // Get matches from current session
+        const matches = await api(`./api/sessions/${currentSession.session_id}`);
+        
+        if (matches.matches && matches.matches.length > 0) {
+            matches.matches.forEach(match => {
+                const team1 = match.team1 || [];
+                const team2 = match.team2 || [];
+                
+                // Track teammates
+                if (team1.length === 2) {
+                    const key = [team1[0], team1[1]].sort().join('|');
+                    existingTeammates.add(key);
+                }
+                if (team2.length === 2) {
+                    const key = [team2[0], team2[1]].sort().join('|');
+                    existingTeammates.add(key);
+                }
+                
+                // Track opponents
+                if (team1.length === 2 && team2.length === 2) {
+                    team1.forEach(p1 => {
+                        team2.forEach(p2 => {
+                            const key = [p1, p2].sort().join('|');
+                            existingOpponents.add(key);
+                        });
+                    });
+                }
+            });
+        }
+        
+        // Find unplayed teammate pairings
+        const unplayedTeammates = [];
+        for (let i = 0; i < activePlayers.length; i++) {
+            for (let j = i + 1; j < activePlayers.length; j++) {
+                const key = [activePlayers[i], activePlayers[j]].sort().join('|');
+                if (!existingTeammates.has(key)) {
+                    unplayedTeammates.push([activePlayers[i], activePlayers[j]]);
+                }
+            }
+        }
+        
+        // Find unplayed opponent pairings
+        const unplayedOpponents = [];
+        for (let i = 0; i < activePlayers.length; i++) {
+            for (let j = i + 1; j < activePlayers.length; j++) {
+                const key = [activePlayers[i], activePlayers[j]].sort().join('|');
+                if (!existingOpponents.has(key)) {
+                    unplayedOpponents.push([activePlayers[i], activePlayers[j]]);
+                }
+            }
+        }
+        
+        // Render unplayed teammates
+        const teammatesContainer = qs('#queueTeammatesList');
+        if (teammatesContainer) {
+            if (unplayedTeammates.length === 0) {
+                teammatesContainer.innerHTML = '<div style="color: var(--text-muted);">All partnerships have been played! 🎉</div>';
+            } else {
+                teammatesContainer.innerHTML = unplayedTeammates.map(pair => 
+                    `<div class="queue-item">${escapeHtml(pair[0])} & ${escapeHtml(pair[1])}</div>`
+                ).join('');
+            }
+        }
+        
+        // Render unplayed opponents
+        const opponentsContainer = qs('#queueOpponentsList');
+        if (opponentsContainer) {
+            if (unplayedOpponents.length === 0) {
+                opponentsContainer.innerHTML = '<div style="color: var(--text-muted);">All opponent matchups have been played! 🎉</div>';
+            } else {
+                opponentsContainer.innerHTML = unplayedOpponents.map(pair => 
+                    `<div class="queue-item">${escapeHtml(pair[0])} vs ${escapeHtml(pair[1])}</div>`
+                ).join('');
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load queue data:', error);
+        // Don't show error toast - it's not critical
+    }
+}
+
 // ==================== History Page ====================
 
 let sessionsCache = {};
@@ -2206,22 +3216,54 @@ async function loadPlayerMatchDetails(playerName, targetEl) {
     }
 }
 
+// Pagination state
+const historyPaginationState = {
+    currentPage: 1,
+    perPage: 10,
+    totalSessions: 0
+};
+
 async function initHistory() {
+    await loadCurrentUser();
     await loadSessions();
 }
 
-async function loadSessions() {
+async function loadSessions(page = 1) {
     try {
         const sessions = await api('./api/sessions');
         const tbody = qs('#sessionsTableBody');
+        const actionsHeader = qs('#historyActionsHeader');
         
-        if (sessions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="table-empty">No sessions recorded yet</td></tr>';
+        // Hide actions column if not admin
+        if (actionsHeader) {
+            actionsHeader.style.display = isAdmin() ? '' : 'none';
+        }
+        
+        // Filter sessions to only show those with games
+        const sessionsWithGames = sessions.filter(session => session.match_count > 0);
+        
+        const colspanCount = isAdmin() ? 4 : 3;
+        
+        if (sessionsWithGames.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No sessions with games yet</td></tr>`;
+            renderPagination(0, 0);
             return;
         }
         
+        // Sort by date descending (most recent first)
+        sessionsWithGames.sort((a, b) => b.date.localeCompare(a.date));
+        
+        // Update pagination state
+        historyPaginationState.totalSessions = sessionsWithGames.length;
+        historyPaginationState.currentPage = page;
+        
+        // Calculate pagination
+        const startIndex = (page - 1) * historyPaginationState.perPage;
+        const endIndex = startIndex + historyPaginationState.perPage;
+        const paginatedSessions = sessionsWithGames.slice(startIndex, endIndex);
+        
         // Build session rows - will populate pills/text after fetching match data
-        const rowsHtml = await Promise.all(sessions.map(async session => {
+        const rowsHtml = await Promise.all(paginatedSessions.map(async session => {
             // Detect mobile viewport
             const isMobile = window.matchMedia('(max-width: 768px)').matches;
             let playersHtml = '<div>Loading...</div>';
@@ -2276,12 +3318,12 @@ async function loadSessions() {
                 <tr data-session-id="${session.session_id}" data-session-date="${session.date}" class="session-row" onclick="toggleSession('${session.session_id}')" style="cursor: pointer;">
                     <td onclick="event.stopPropagation();">
                         <div class="session-date-cell">
-                            <button class="btn-icon-small" 
+                            ${isAdmin() ? `<button class="btn-icon-small" 
                                     onclick="event.stopPropagation(); startSessionDateEdit('${session.session_id}')" 
                                     aria-label="Edit session date"
                                     title="Edit date">
                                 ✎
-                            </button>
+                            </button>` : ''}
                             <div class="session-date-display">
                                 ${formatDateDesign(session.date)}
                             </div>
@@ -2289,14 +3331,14 @@ async function loadSessions() {
                     </td>
                     <td>${playersHtml}</td>
                     <td style="text-align: center;">${gamesDisplay}</td>
-                    <td style="text-align: center;" onclick="event.stopPropagation();">
+                    ${isAdmin() ? `<td style="text-align: center;" onclick="event.stopPropagation();">
                         <button class="btn btn-danger btn-small" onclick="deleteSession('${session.session_id}', ${session.match_count})" aria-label="Delete session" style="padding: 0.35rem 0.65rem; font-size: 1.25rem; line-height: 1;">
                             &times;
                         </button>
-                    </td>
+                    </td>` : ''}
                 </tr>
                 <tr id="expand-${session.session_id}" class="session-details" style="display: none;">
-                    <td colspan="4">
+                    <td colspan="${isAdmin() ? 4 : 3}">
                         <div style="margin: 0.5rem;">
                             <!-- Tabbed Carousel -->
                             <div class="card" style="margin: 0;">
@@ -2328,6 +3370,15 @@ async function loadSessions() {
                                                 aria-selected="false"
                                                 onclick="switchHistoryTab('${session.session_id}', 'stats')">
                                             Stats
+                                        </button>
+                                        <button type="button" 
+                                                class="tab-item" 
+                                                data-session-id="${session.session_id}"
+                                                data-tab-target="teams" 
+                                                role="tab" 
+                                                aria-selected="false"
+                                                onclick="switchHistoryTab('${session.session_id}', 'teams')">
+                                            Teams
                                         </button>
                                     </nav>
                                 </div>
@@ -2380,6 +3431,15 @@ async function loadSessions() {
                                             </div>
                                         </div>
                                     </section>
+                                    
+                                    <!-- Pane 4: Partnership Stats (hidden by default) -->
+                                    <section id="pane-teams-${session.session_id}" class="carousel-pane" role="tabpanel" hidden>
+                                        <div style="padding: 1rem; overflow-y: auto;">
+                                            <div id="teams-${session.session_id}" class="win-rate-list">
+                                                <div style="color: var(--text-muted); font-size: 0.875rem;">Loading...</div>
+                                            </div>
+                                        </div>
+                                    </section>
                                 </div>
                             </div>
                         </div>
@@ -2391,12 +3451,88 @@ async function loadSessions() {
         tbody.innerHTML = rowsHtml.join('');
         
         sessionsCache = {};
-        sessions.forEach(s => {
+        sessionsWithGames.forEach(s => {
             sessionsCache[s.session_id] = s;
         });
+        
+        // Render pagination controls
+        const totalPages = Math.ceil(historyPaginationState.totalSessions / historyPaginationState.perPage);
+        console.log('Pagination:', {
+            totalSessions: historyPaginationState.totalSessions,
+            currentPage: historyPaginationState.currentPage,
+            totalPages: totalPages,
+            showing: paginatedSessions.length
+        });
+        renderPagination(historyPaginationState.currentPage, totalPages);
     } catch (error) {
         toast('Failed to load sessions', 'error');
     }
+}
+
+// Render pagination controls
+function renderPagination(currentPage, totalPages) {
+    const container = qs('#paginationControls');
+    console.log('renderPagination called:', { currentPage, totalPages, containerFound: !!container });
+    
+    if (!container) {
+        console.error('Pagination container #paginationControls not found!');
+        return;
+    }
+    
+    if (totalPages <= 1) {
+        console.log('Only 1 page, hiding pagination');
+        container.innerHTML = '';
+        return;
+    }
+    
+    console.log('Rendering pagination controls...');
+    
+    let paginationHtml = '<div class="pagination">';
+    
+    // Previous button
+    if (currentPage > 1) {
+        paginationHtml += `<button class="pagination-btn" onclick="loadSessions(${currentPage - 1})" aria-label="Previous page">&laquo;</button>`;
+    }
+    
+    // Page numbers
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    
+    // Adjust start if we're near the end
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+    
+    // First page + ellipsis if needed
+    if (startPage > 1) {
+        paginationHtml += `<button class="pagination-btn" onclick="loadSessions(1)">1</button>`;
+        if (startPage > 2) {
+            paginationHtml += '<span class="pagination-ellipsis">...</span>';
+        }
+    }
+    
+    // Page numbers
+    for (let i = startPage; i <= endPage; i++) {
+        const activeClass = i === currentPage ? 'active' : '';
+        paginationHtml += `<button class="pagination-btn ${activeClass}" onclick="loadSessions(${i})">${i}</button>`;
+    }
+    
+    // Ellipsis + last page if needed
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            paginationHtml += '<span class="pagination-ellipsis">...</span>';
+        }
+        paginationHtml += `<button class="pagination-btn" onclick="loadSessions(${totalPages})">${totalPages}</button>`;
+    }
+    
+    // Next button
+    if (currentPage < totalPages) {
+        paginationHtml += `<button class="pagination-btn" onclick="loadSessions(${currentPage + 1})" aria-label="Next page">&raquo;</button>`;
+    }
+    
+    paginationHtml += '</div>';
+    container.innerHTML = paginationHtml;
 }
 
 async function toggleSession(sessionId) {
@@ -2623,10 +3759,42 @@ async function patchSessionDate(sessionId, newDate, merge = false) {
 async function loadSessionMatches(sessionId) {
     try {
         const sessionData = await api(`./api/sessions/${sessionId}`);
-        const tbody = qs(`#matches-${sessionId}`);
+        const container = qs(`#pane-history-${sessionId}`);
         
+        if (!container) return;
+        
+        // Build add game form HTML (only for admins)
+        const addGameFormHtml = isAdmin() ? `
+            <button type="button" class="btn-add-game" id="btn-add-game-${sessionId}" onclick="toggleAddGameForm('${sessionId}')" aria-label="Add game">+</button>
+            <div class="add-game-form is-hidden" id="add-game-form-${sessionId}">
+                <div>
+                    <label style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; display: block;">Select Players (4)</label>
+                    <div class="history-player-pills" id="add-game-players-${sessionId}"></div>
+                </div>
+                <div class="form-row">
+                    <label>Team A Score</label>
+                    <input type="number" id="add-game-team1-score-${sessionId}" min="0" placeholder="0">
+                </div>
+                <div class="form-row">
+                    <label>Team B Score</label>
+                    <input type="number" id="add-game-team2-score-${sessionId}" min="0" placeholder="0">
+                </div>
+                <div>
+                    <label style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; display: block;">Bet Amount</label>
+                    <div class="form-bet-selector" id="add-game-bet-${sessionId}"></div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary btn-small" onclick="cancelAddGame('${sessionId}')">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-small" onclick="submitAddGame('${sessionId}')">Add Game</button>
+                </div>
+            </div>
+        ` : '';
+        
+        // Build matches table HTML
+        const actionsColspan = isAdmin() ? 6 : 5;
+        let matchesHtml = '';
         if (sessionData.matches.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No matches in this session</td></tr>';
+            matchesHtml = `<tr><td colspan="${actionsColspan}" class="table-empty">No matches in this session</td></tr>`;
         } else {
             // Sort by game number
             sessionData.matches.sort((a, b) => a.game_number - b.game_number);
@@ -2634,9 +3802,10 @@ async function loadSessionMatches(sessionId) {
             // Detect mobile viewport
             const isMobile = window.matchMedia('(max-width: 768px)').matches;
             
-            tbody.innerHTML = sessionData.matches.map((match, index) => {
+            matchesHtml = sessionData.matches.map((match, index) => {
                 // Use session-specific game number (1-based index)
                 const sessionGameNumber = index + 1;
+                const matchId = match.match_id;
                 
                 // Determine winner and apply team color classes
                 const team1Won = match.team1_score > match.team2_score;
@@ -2650,21 +3819,58 @@ async function loadSessionMatches(sessionId) {
                 // Format score - combined on mobile, separate desktop shows combined too
                 const scoreDisplay = `${match.team1_score}-${match.team2_score}`;
                 
+                // Escape match data for onclick handlers
+                const matchJson = JSON.stringify(match).replace(/"/g, '&quot;');
+                
+                // Only show actions column if admin
+                const actionsCell = isAdmin() ? `
+                    <td style="text-align: center;">
+                        <button class="btn btn-secondary btn-small" onclick='startEditMatch("${sessionId}", "${matchId}", ${matchJson})' aria-label="Edit match" title="Edit" style="padding: 0.3rem 0.5rem; font-size: 0.75rem; margin-right: 0.25rem;">✎</button>
+                        <button class="btn btn-danger btn-small" onclick="deleteMatch('${sessionId}', '${matchId}')" aria-label="Delete match" title="Delete" style="padding: 0.3rem 0.5rem; font-size: 0.875rem;">&times;</button>
+                    </td>
+                ` : '';
+                
                 return `
-                    <tr>
+                    <tr id="match-row-${matchId}">
                         <td>${sessionGameNumber}</td>
                         <td class="${team1Class}">${team1Display}</td>
                         <td style="text-align: center;">${scoreDisplay}</td>
                         <td class="${team2Class}">${team2Display}</td>
                         <td style="text-align: center;">${formatCurrency(match.game_value)}</td>
+                        ${actionsCell}
                     </tr>
                 `;
             }).join('');
         }
         
-        // Load session earnings and stats
+        // Update container with add form and table
+        const actionsHeader = isAdmin() ? '<th style="width: 100px; text-align: center;">Actions</th>' : '';
+        
+        container.innerHTML = `
+            ${addGameFormHtml}
+            <div class="table-container">
+                <table class="table table-compact">
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">#</th>
+                            <th>Team A</th>
+                            <th style="width: 80px; text-align: center;">Score</th>
+                            <th>Team B</th>
+                            <th style="width: 80px; text-align: center;">Bet</th>
+                            ${actionsHeader}
+                        </tr>
+                    </thead>
+                    <tbody id="matches-${sessionId}">
+                        ${matchesHtml}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        
+        // Load session earnings, stats, and partnerships
         await loadSessionEarnings(sessionId);
         await loadHistorySessionStats(sessionId);
+        await loadHistorySessionPartnerships(sessionId);
     } catch (error) {
         toast('Failed to load session matches', 'error');
     }
@@ -2745,12 +3951,98 @@ async function loadHistorySessionStats(sessionId) {
     }
 }
 
+async function loadHistorySessionPartnerships(sessionId) {
+    try {
+        const statsData = await api(`./api/sessions/${sessionId}/stats`);
+        const container = qs(`#teams-${sessionId}`);
+        
+        if (!container) return;
+        
+        const partnerships = statsData.partnerships || [];
+        
+        if (partnerships.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); padding: 1rem; text-align: center;">No partnership data available</div>';
+            return;
+        }
+        
+        // Sort by win rate (descending), then by games as tiebreaker
+        partnerships.sort((a, b) => {
+            if (b.winRate !== a.winRate) return b.winRate - a.winRate;
+            return b.games - a.games;
+        });
+        
+        // Clear container
+        container.innerHTML = '';
+        
+        // Render partnerships with win-rate-bar style
+        partnerships.forEach(pair => {
+            const winPercent = Math.round(pair.winRate);
+            const lossPercent = 100 - winPercent;
+            
+            // Create row
+            const row = document.createElement('div');
+            row.className = 'win-rate-row';
+            
+            // Name cell (partnership label)
+            const nameCell = document.createElement('div');
+            nameCell.className = 'name';
+            nameCell.textContent = pair.partnership;
+            nameCell.title = pair.partnership;
+            
+            // Games cell
+            const gamesCell = document.createElement('div');
+            gamesCell.className = 'games';
+            gamesCell.textContent = pair.games;
+            
+            // Bar container
+            const barContainer = document.createElement('div');
+            barContainer.className = 'bar-container';
+            
+            // Win rate bar
+            const barWrap = document.createElement('div');
+            barWrap.className = 'win-rate-bar';
+            
+            // Win segment
+            const winSeg = document.createElement('div');
+            winSeg.className = 'win-rate-bar-segment win-segment';
+            winSeg.style.width = `${winPercent}%`;
+            
+            // Loss segment
+            const lossSeg = document.createElement('div');
+            lossSeg.className = 'win-rate-bar-segment loss-segment';
+            lossSeg.style.width = `${lossPercent}%`;
+            
+            // Label
+            const label = document.createElement('div');
+            label.className = 'win-rate-label';
+            label.textContent = `${winPercent}%`;
+            
+            // Assemble bar
+            barWrap.appendChild(winSeg);
+            barWrap.appendChild(lossSeg);
+            barWrap.appendChild(label);
+            barContainer.appendChild(barWrap);
+            
+            // Assemble row
+            row.appendChild(nameCell);
+            row.appendChild(gamesCell);
+            row.appendChild(barContainer);
+            
+            container.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Failed to load history session partnerships:', error);
+        // Don't show error toast for this - it's a non-critical feature
+    }
+}
+
 // Switch between carousel tabs in history session view
 function switchHistoryTab(sessionId, target) {
     const panes = {
         'history': qs(`#pane-history-${sessionId}`),
         'earnings': qs(`#pane-earnings-${sessionId}`),
-        'stats': qs(`#pane-stats-${sessionId}`)
+        'stats': qs(`#pane-stats-${sessionId}`),
+        'teams': qs(`#pane-teams-${sessionId}`)
     };
     
     const tabs = qsa(`button[data-session-id="${sessionId}"]`);
@@ -2794,6 +4086,437 @@ async function deleteSession(sessionId, matchCount) {
         await loadSessions();
     } catch (error) {
         toast(error.message, 'error');
+    }
+}
+
+// ==================== History Edit Mode ====================
+
+// State for add/edit game forms
+const historyEditState = {
+    selectedPlayers: [],
+    selectedBet: 1,
+    activePlayers: [],
+    editingMatchId: null
+};
+
+// Toggle add game form visibility
+async function toggleAddGameForm(sessionId) {
+    const form = qs(`#add-game-form-${sessionId}`);
+    const button = qs(`#btn-add-game-${sessionId}`);
+    
+    if (!form || !button) return;
+    
+    const isHidden = form.classList.contains('is-hidden');
+    
+    if (isHidden) {
+        // Close any edit in progress
+        if (historyEditState.editingMatchId) {
+            await cancelEditMatch(sessionId, historyEditState.editingMatchId);
+        }
+        
+        // Show form
+        form.classList.remove('is-hidden');
+        button.textContent = '−';
+        button.setAttribute('aria-label', 'Close add game form');
+        
+        // Load players from session matches - wait for this to complete
+        await loadPlayersFromSession(sessionId);
+        
+        // Reset form state
+        historyEditState.selectedPlayers = [];
+        historyEditState.selectedBet = 1;
+        
+        // Render UI elements after players are loaded
+        renderHistoryPlayerPills(sessionId);
+        renderHistoryBetSelector(sessionId);
+        
+        // Reset scores
+        const team1Input = qs(`#add-game-team1-score-${sessionId}`);
+        const team2Input = qs(`#add-game-team2-score-${sessionId}`);
+        if (team1Input) team1Input.value = '';
+        if (team2Input) team2Input.value = '';
+    } else {
+        // Hide form
+        form.classList.add('is-hidden');
+        button.textContent = '+';
+        button.setAttribute('aria-label', 'Add game');
+    }
+}
+
+// Load players from session matches (only players who played in this session)
+async function loadPlayersFromSession(sessionId) {
+    try {
+        const sessionData = await api(`./api/sessions/${sessionId}`);
+        if (sessionData.matches && sessionData.matches.length > 0) {
+            // Extract unique player names from all matches in this session
+            const playerSet = new Set();
+            sessionData.matches.forEach(match => {
+                if (match.team1) match.team1.forEach(p => playerSet.add(p));
+                if (match.team2) match.team2.forEach(p => playerSet.add(p));
+            });
+            historyEditState.activePlayers = Array.from(playerSet).sort();
+            console.log('Loaded players from session matches:', historyEditState.activePlayers);
+        } else {
+            // No matches yet, fallback to all active players
+            await loadActivePlayersForHistory();
+        }
+    } catch (error) {
+        console.error('Failed to load players from session:', error);
+        // Fallback to all active players
+        await loadActivePlayersForHistory();
+    }
+}
+
+// Load active players for history edit mode
+async function loadActivePlayersForHistory() {
+    try {
+        const players = await api('./api/players');
+        historyEditState.activePlayers = players.filter(p => {
+            const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
+            return isActive;
+        }).map(p => typeof p === 'string' ? p : p.name);
+    } catch (error) {
+        console.error('Failed to load players for history edit:', error);
+        toast('Failed to load players', 'error');
+    }
+}
+
+// Reset add game form
+function resetAddGameForm(sessionId) {
+    historyEditState.selectedPlayers = [];
+    historyEditState.selectedBet = 1;
+    
+    // Reset player pills
+    renderHistoryPlayerPills(sessionId);
+    
+    // Reset scores
+    const team1Input = qs(`#add-game-team1-score-${sessionId}`);
+    const team2Input = qs(`#add-game-team2-score-${sessionId}`);
+    if (team1Input) team1Input.value = '';
+    if (team2Input) team2Input.value = '';
+    
+    // Reset bet selection
+    renderHistoryBetSelector(sessionId);
+}
+
+// Render player pills for selection
+function renderHistoryPlayerPills(sessionId, containerId = null) {
+    const container = qs(containerId || `#add-game-players-${sessionId}`);
+    if (!container) {
+        console.warn('Player pills container not found:', containerId || `#add-game-players-${sessionId}`);
+        return;
+    }
+    
+    if (historyEditState.activePlayers.length === 0) {
+        container.innerHTML = '<div class="text-muted" style="font-size: 0.875rem;">No active players available</div>';
+        return;
+    }
+    
+    console.log('Rendering pills for players:', historyEditState.activePlayers);
+    
+    container.innerHTML = historyEditState.activePlayers.map(player => {
+        const isSelected = historyEditState.selectedPlayers.includes(player);
+        const selectionIndex = historyEditState.selectedPlayers.indexOf(player);
+        
+        let classes = 'history-player-pill';
+        if (isSelected) {
+            classes += ' selected';
+            // First 2 are team A, next 2 are team B
+            if (selectionIndex < 2) {
+                classes += ' team-a';
+            } else {
+                classes += ' team-b';
+            }
+        }
+        
+        return `<button type="button" class="${classes}" data-player="${escapeHtml(player)}" data-session="${sessionId}">${escapeHtml(player)}</button>`;
+    }).join('');
+    
+    // Add event listeners to pills
+    container.querySelectorAll('.history-player-pill').forEach(pill => {
+        pill.addEventListener('click', function() {
+            const player = this.getAttribute('data-player');
+            const session = this.getAttribute('data-session');
+            toggleHistoryPlayerSelection(session, player);
+        });
+    });
+}
+
+// Toggle player selection in history edit
+function toggleHistoryPlayerSelection(sessionId, player) {
+    const index = historyEditState.selectedPlayers.indexOf(player);
+    
+    if (index >= 0) {
+        // Deselect
+        historyEditState.selectedPlayers.splice(index, 1);
+    } else {
+        // Select if less than 4
+        if (historyEditState.selectedPlayers.length < 4) {
+            historyEditState.selectedPlayers.push(player);
+        }
+    }
+    
+    // Re-render pills
+    renderHistoryPlayerPills(sessionId);
+}
+
+// Render bet amount selector
+function renderHistoryBetSelector(sessionId, containerId = null) {
+    const container = qs(containerId || `#add-game-bet-${sessionId}`);
+    if (!container) return;
+    
+    const betAmounts = [0, 1, 2, 3, 4, 5];
+    container.innerHTML = betAmounts.map(amount => {
+        const classes = amount === historyEditState.selectedBet ? 'btn-bet-small selected' : 'btn-bet-small';
+        return `<button type="button" class="${classes}" data-value="${amount}" onclick="selectHistoryBet(${amount}, '${sessionId}')" aria-label="Bet $${amount}">$${amount}</button>`;
+    }).join('');
+}
+
+// Select bet amount
+function selectHistoryBet(amount, sessionId) {
+    historyEditState.selectedBet = amount;
+    renderHistoryBetSelector(sessionId);
+}
+
+// Submit new game
+async function submitAddGame(sessionId) {
+    // Validate selection
+    if (historyEditState.selectedPlayers.length !== 4) {
+        toast('Please select exactly 4 players', 'error');
+        return;
+    }
+    
+    const team1ScoreInput = qs(`#add-game-team1-score-${sessionId}`);
+    const team2ScoreInput = qs(`#add-game-team2-score-${sessionId}`);
+    
+    if (!team1ScoreInput || !team2ScoreInput) {
+        toast('Score inputs not found', 'error');
+        return;
+    }
+    
+    const team1Score = parseInt(team1ScoreInput.value);
+    const team2Score = parseInt(team2ScoreInput.value);
+    
+    if (isNaN(team1Score) || isNaN(team2Score) || team1Score < 0 || team2Score < 0) {
+        toast('Please enter valid scores', 'error');
+        return;
+    }
+    
+    // Build match data with session_id to ensure it's added to the correct session
+    const matchData = {
+        session_id: sessionId,
+        team1: [historyEditState.selectedPlayers[0], historyEditState.selectedPlayers[1]],
+        team2: [historyEditState.selectedPlayers[2], historyEditState.selectedPlayers[3]],
+        team1_score: team1Score,
+        team2_score: team2Score,
+        game_value: historyEditState.selectedBet
+    };
+    
+    try {
+        await api('./api/matches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(matchData)
+        });
+        
+        toast('Game added successfully');
+        
+        // Reset form and hide it
+        toggleAddGameForm(sessionId);
+        
+        // Reload session data
+        await loadSessionMatches(sessionId);
+        await loadSessionEarnings(sessionId);
+        await loadHistorySessionStats(sessionId);
+        
+        // Reload sessions list to update game count
+        const expandedState = Array.from(expandedSessions);
+        await loadSessions();
+        expandedState.forEach(sid => {
+            const row = qs(`tr[data-session-id="${sid}"]`);
+            if (row) row.click();
+        });
+    } catch (error) {
+        toast(error.message || 'Failed to add game', 'error');
+    }
+}
+
+// Cancel add game
+function cancelAddGame(sessionId) {
+    toggleAddGameForm(sessionId);
+}
+
+// Start editing a match
+async function startEditMatch(sessionId, matchId, match) {
+    // Close add game form if open
+    const addForm = qs(`#add-game-form-${sessionId}`);
+    const addButton = qs(`#btn-add-game-${sessionId}`);
+    if (addForm && !addForm.classList.contains('is-hidden')) {
+        addForm.classList.add('is-hidden');
+        if (addButton) {
+            addButton.textContent = '+';
+            addButton.setAttribute('aria-label', 'Add game');
+        }
+    }
+    
+    // Close any other edit in progress
+    if (historyEditState.editingMatchId && historyEditState.editingMatchId !== matchId) {
+        await cancelEditMatch(sessionId, historyEditState.editingMatchId);
+    }
+    
+    // Load players from session matches
+    await loadPlayersFromSession(sessionId);
+    
+    // Set editing state
+    historyEditState.editingMatchId = matchId;
+    historyEditState.selectedPlayers = [...match.team1, ...match.team2];
+    historyEditState.selectedBet = match.game_value;
+    
+    // Get the match row
+    const row = qs(`#match-row-${matchId}`);
+    if (!row) return;
+    
+    // Add edit mode class
+    row.classList.add('match-row-edit');
+    
+    // Replace row content with edit form
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    
+    row.innerHTML = `
+        <td colspan="6" style="padding: 0.75rem;">
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <div>
+                    <label style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; display: block;">Players</label>
+                    <div class="history-player-pills" id="edit-players-${matchId}"></div>
+                </div>
+                <div class="form-row">
+                    <label>Team A Score</label>
+                    <input type="number" id="edit-team1-score-${matchId}" value="${match.team1_score}" min="0">
+                </div>
+                <div class="form-row">
+                    <label>Team B Score</label>
+                    <input type="number" id="edit-team2-score-${matchId}" value="${match.team2_score}" min="0">
+                </div>
+                <div>
+                    <label style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; display: block;">Bet Amount</label>
+                    <div class="form-bet-selector" id="edit-bet-${matchId}"></div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary btn-small" onclick="cancelEditMatch('${sessionId}', '${matchId}')">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-small" onclick="saveEditMatch('${sessionId}', '${matchId}')">Save</button>
+                </div>
+            </div>
+        </td>
+    `;
+    
+    // Render player pills and bet selector
+    renderHistoryPlayerPills(sessionId, `#edit-players-${matchId}`);
+    renderHistoryBetSelector(sessionId, `#edit-bet-${matchId}`);
+}
+
+// Cancel edit match
+async function cancelEditMatch(sessionId, matchId) {
+    historyEditState.editingMatchId = null;
+    historyEditState.selectedPlayers = [];
+    historyEditState.selectedBet = 1;
+    
+    // Reload the matches to restore original view
+    await loadSessionMatches(sessionId);
+}
+
+// Save edited match
+async function saveEditMatch(sessionId, matchId) {
+    // Validate selection
+    if (historyEditState.selectedPlayers.length !== 4) {
+        toast('Please select exactly 4 players', 'error');
+        return;
+    }
+    
+    const team1ScoreInput = qs(`#edit-team1-score-${matchId}`);
+    const team2ScoreInput = qs(`#edit-team2-score-${matchId}`);
+    
+    if (!team1ScoreInput || !team2ScoreInput) {
+        toast('Score inputs not found', 'error');
+        return;
+    }
+    
+    const team1Score = parseInt(team1ScoreInput.value);
+    const team2Score = parseInt(team2ScoreInput.value);
+    
+    if (isNaN(team1Score) || isNaN(team2Score) || team1Score < 0 || team2Score < 0) {
+        toast('Please enter valid scores', 'error');
+        return;
+    }
+    
+    // Build update data
+    const updateData = {
+        team1: [historyEditState.selectedPlayers[0], historyEditState.selectedPlayers[1]],
+        team2: [historyEditState.selectedPlayers[2], historyEditState.selectedPlayers[3]],
+        team1_score: team1Score,
+        team2_score: team2Score,
+        game_value: historyEditState.selectedBet
+    };
+    
+    try {
+        await api(`./api/matches/${matchId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updateData)
+        });
+        
+        toast('Game updated successfully');
+        
+        // Reset editing state
+        historyEditState.editingMatchId = null;
+        historyEditState.selectedPlayers = [];
+        historyEditState.selectedBet = 1;
+        
+        // Reload session data
+        await loadSessionMatches(sessionId);
+        await loadSessionEarnings(sessionId);
+        await loadHistorySessionStats(sessionId);
+        await loadHistorySessionPartnerships(sessionId);
+        
+        // Reload sessions list to update if needed
+        const expandedState = Array.from(expandedSessions);
+        await loadSessions();
+        expandedState.forEach(sid => {
+            const row = qs(`tr[data-session-id="${sid}"]`);
+            if (row) row.click();
+        });
+    } catch (error) {
+        toast(error.message || 'Failed to update game', 'error');
+    }
+}
+
+// Delete a match
+async function deleteMatch(sessionId, matchId) {
+    if (!confirm('Are you sure you want to delete this game?')) {
+        return;
+    }
+    
+    try {
+        await api(`./api/matches/${matchId}`, {
+            method: 'DELETE'
+        });
+        
+        toast('Game deleted successfully');
+        
+        // Reload session data
+        await loadSessionMatches(sessionId);
+        await loadSessionEarnings(sessionId);
+        await loadHistorySessionStats(sessionId);
+        await loadHistorySessionPartnerships(sessionId);
+        
+        // Reload sessions list to update game count
+        const expandedState = Array.from(expandedSessions);
+        await loadSessions();
+        expandedState.forEach(sid => {
+            const row = qs(`tr[data-session-id="${sid}"]`);
+            if (row) row.click();
+        });
+    } catch (error) {
+        toast(error.message || 'Failed to delete game', 'error');
     }
 }
 
@@ -3402,18 +5125,24 @@ function initCarouselTabs() {
     const panes = {
         'match-history': qs('#pane-match-history'),
         'player-earnings': qs('#pane-player-earnings'),
-        'partnership-stats': qs('#pane-partnership-stats')
+        'partnership-stats': qs('#pane-partnership-stats'),
+        'queue': qs('#pane-queue')
     };
 
-    // Verify all panes exist
+    // Verify core panes exist (Queue is optional)
     if (!panes['match-history'] || !panes['player-earnings'] || !panes['partnership-stats']) {
-        console.warn('Carousel tabs: One or more panes not found');
+        console.warn('Carousel tabs: One or more core panes not found');
         return;
+    }
+    
+    if (!panes['queue']) {
+        console.warn('Carousel tabs: Queue pane not found (optional)');
     }
 
     function activate(target) {
         // Toggle panes
         Object.entries(panes).forEach(([key, pane]) => {
+            if (!pane) return; // Skip null panes
             const isActive = key === target;
             pane.classList.toggle('is-active', isActive);
             if (isActive) {
@@ -3435,7 +5164,12 @@ function initCarouselTabs() {
     // Wire up clicks
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
-            activate(tab.dataset.tabTarget);
+            const target = tab.dataset.tabTarget;
+            activate(target);
+            // Load queue data when Queue tab is activated
+            if (target === 'queue') {
+                loadQueueData();
+            }
         });
     });
 

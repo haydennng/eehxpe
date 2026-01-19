@@ -93,10 +93,19 @@ Daily backups via Windows Task Scheduler (3:00 AM)
 
 ## Development Workflow
 
+### Option 1: Develop in eehxpe repo directly (recommended)
+1. **Start dev server**: `.\dev.ps1` or `.\scripts\start-dev.ps1`
+2. **Make changes** in `apps/badminton/`
+3. **Test locally** at http://127.0.0.1:8001/badminton (auto-reload enabled)
+4. **Commit & push** to deploy to production
+
+### Option 2: Develop in separate repo
 1. **Develop locally** in `badminton-matchups` repo
 2. **Test locally** with Flask dev server
 3. **Publish to production** via GitHub Action (or manual copy)
 4. **Auto-deploy** triggers and restarts production service
+
+See `DEV-README.md` for complete development setup guide.
 
 ## URLs
 

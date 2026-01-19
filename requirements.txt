@@ -1,10 +1,16 @@
 # Production dependencies for eehxpe platform
 Flask>=2.3.0
+Flask-HTTPAuth>=4.0.0
+Flask-Login>=0.6.0
 waitress>=2.1.0
 werkzeug>=2.3.0
 
+# Database
+SQLAlchemy>=2.0.0
+
+# Security
+argon2-cffi>=21.0.0
+
 # Future dependencies (uncomment when needed)
-# Flask-Login>=0.6.0  # For user authentication
-# argon2-cffi>=21.0.0  # Secure password hashing
 # flask-limiter>=3.0.0  # Rate limiting
 # python-dotenv>=1.0.0  # Environment variable management

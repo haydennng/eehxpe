@@ -1,382 +1,380 @@
 """
-Match Storage System for Badminton Matchups
+Database-Backed Match Storage System
 
-This module handles persistence of match history using JSON files.
+Replacement for JSON-based MatchStorage that uses SQLAlchemy database.
+Maintains API compatibility with the original match_storage.py.
 """
 
-import json
-import os
 from datetime import datetime, date
 from typing import List, Dict, Optional
-from pathlib import Path
-import threading
+from database import session_scope
+from models import User, Session, Match as MatchModel
 
 
 class MatchStorage:
-    def __init__(self, data_dir: str = "data"):
+    """Database-backed match storage with compatible API"""
+    
+    def __init__(self, data_dir: str = None):
         """
         Initialize the match storage system.
-        
-        Args:
-            data_dir: Directory to store match data files
+        data_dir parameter kept for API compatibility but not used.
         """
-        self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(exist_ok=True)
-        self.matches_file = self.data_dir / "matches.json"
-        self.sessions_file = self.data_dir / "sessions.json"
-        self.lock = threading.Lock()
-        
-    def _load_json(self, file_path: Path):
-        """Load data from a JSON file."""
-        if not file_path.exists():
-            return [] if file_path == self.matches_file else {}
-        
-        try:
-            with open(file_path, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return [] if file_path == self.matches_file else {}
-    
-    def _save_json(self, file_path: Path, data):
-        """Save data to a JSON file."""
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
-    
-    def _get_local_today(self) -> date:
-        """Get the current local date."""
-        return datetime.now().date()
-    
-    def _date_from_timestamp(self, ts_str: str) -> date:
-        """Parse a date from an ISO timestamp string."""
-        try:
-            dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-            return dt.date()
-        except (ValueError, AttributeError):
-            return self._get_local_today()
-    
-    def _get_session_id_for_date(self, session_date: date) -> str:
-        """Generate session ID from a date."""
-        return f"session_{session_date.isoformat()}"
+        # data_dir not used in database version but kept for compatibility
+        pass
     
     def save_match(self, match_data: Dict) -> str:
         """
-        Save a match to the history and associate with current session.
+        Save a match to the database.
         
         Args:
-            match_data: Dictionary containing match information
-            
+            match_data: Dictionary containing match information with keys:
+                - team1: List of 2 player usernames
+                - team2: List of 2 player usernames
+                - team1_score: integer
+                - team2_score: integer
+                - game_value: float
+                - game_number: integer
+                - winner: 'team1' or 'team2'
+                - session_id: optional, defaults to today's session
+                
         Returns:
-            Match ID
+            Match ID (string version of database ID)
         """
-        with self.lock:
-            matches = self._load_json(self.matches_file)
-            
-            # Generate match ID
-            match_id = f"match_{len(matches) + 1}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            timestamp = datetime.now().isoformat()
-            
-            # Determine session
-            if 'session_id' in match_data:
-                session_id = match_data['session_id']
+        with session_scope() as session:
+            # Get or create session
+            if 'session_id' in match_data and isinstance(match_data['session_id'], int):
+                db_session_id = match_data['session_id']
             else:
-                # Auto-associate with current session (unlocked version since we hold lock)
-                today = self._get_local_today()
-                session = self._get_or_create_session_for_date_unlocked(today)
-                session_id = session['session_id']
+                # Get today's session
+                today = datetime.now().date()
+                db_session_obj = self._get_or_create_session_for_date(today, session)
+                db_session_id = db_session_obj.id
             
-            # Add metadata
-            match_record = {
-                'match_id': match_id,
-                'timestamp': timestamp,
-                'session_id': session_id,
-                **{k: v for k, v in match_data.items() if k != 'session_id'}
-            }
+            # Get player IDs
+            team1 = match_data.get('team1', [])
+            team2 = match_data.get('team2', [])
             
-            matches.append(match_record)
-            self._save_json(self.matches_file, matches)
+            if len(team1) != 2 or len(team2) != 2:
+                raise ValueError("Each team must have exactly 2 players")
             
-            # Add match to session
-            self._add_match_to_session(session_id, match_id)
+            team1_p1 = session.query(User).filter_by(username=team1[0]).first()
+            team1_p2 = session.query(User).filter_by(username=team1[1]).first()
+            team2_p1 = session.query(User).filter_by(username=team2[0]).first()
+            team2_p2 = session.query(User).filter_by(username=team2[1]).first()
             
+            if not all([team1_p1, team1_p2, team2_p1, team2_p2]):
+                missing = []
+                if not team1_p1: missing.append(team1[0])
+                if not team1_p2: missing.append(team1[1])
+                if not team2_p1: missing.append(team2[0])
+                if not team2_p2: missing.append(team2[1])
+                raise ValueError(f"Unknown players: {', '.join(missing)}")
+            
+            # Determine winner team
+            winner = match_data.get('winner', 'team1')
+            winner_team = 1 if winner == 'team1' else 2
+            
+            # Create match
+            match = MatchModel(
+                session_id=db_session_id,
+                game_number=match_data.get('game_number', 1),
+                team1_player1_id=team1_p1.id,
+                team1_player2_id=team1_p2.id,
+                team2_player1_id=team2_p1.id,
+                team2_player2_id=team2_p2.id,
+                team1_score=match_data.get('team1_score', 0),
+                team2_score=match_data.get('team2_score', 0),
+                game_value=match_data.get('game_value', 0.0),
+                winner_team=winner_team,
+                mmr_change=match_data.get('mmr_change', 0.0)
+            )
+            
+            session.add(match)
+            session.flush()
+            
+            match_id = f"match_{match.id}"
             return match_id
     
     def get_all_matches(self) -> List[Dict]:
-        """
-        Retrieve all matches from history.
-        
-        Returns:
-            List of match dictionaries
-        """
-        return self._load_json(self.matches_file)
+        """Get all matches from database"""
+        with session_scope() as session:
+            matches = session.query(MatchModel).all()
+            return [self._match_to_dict(m) for m in matches]
     
     def get_matches_by_player(self, player_name: str) -> List[Dict]:
-        """
-        Get all matches involving a specific player.
-        
-        Args:
-            player_name: Name of the player
+        """Get all matches involving a specific player"""
+        with session_scope() as session:
+            player = session.query(User).filter_by(username=player_name).first()
+            if not player:
+                return []
             
-        Returns:
-            List of matches involving the player
-        """
-        all_matches = self.get_all_matches()
-        player_matches = []
-        
-        for match in all_matches:
-            team1 = match.get('team1', [])
-            team2 = match.get('team2', [])
-            if player_name in team1 or player_name in team2:
-                player_matches.append(match)
-        
-        return player_matches
+            from sqlalchemy import or_
+            matches = session.query(MatchModel).filter(
+                or_(
+                    MatchModel.team1_player1_id == player.id,
+                    MatchModel.team1_player2_id == player.id,
+                    MatchModel.team2_player1_id == player.id,
+                    MatchModel.team2_player2_id == player.id
+                )
+            ).all()
+            
+            return [self._match_to_dict(m) for m in matches]
     
     def get_recent_matches(self, limit: int = 10) -> List[Dict]:
-        """
-        Get the most recent matches.
-        
-        Args:
-            limit: Maximum number of matches to return
-            
-        Returns:
-            List of recent matches
-        """
-        matches = self.get_all_matches()
-        return matches[-limit:] if matches else []
+        """Get the most recent matches"""
+        with session_scope() as session:
+            matches = session.query(MatchModel)\
+                .order_by(MatchModel.created_at.desc())\
+                .limit(limit)\
+                .all()
+            return [self._match_to_dict(m) for m in matches]
     
     def delete_match(self, match_id: str) -> bool:
-        """
-        Delete a single match and remove from its session.
-        
-        Args:
-            match_id: Match identifier
-            
-        Returns:
-            True if deleted, False if not found
-        """
-        with self.lock:
-            matches = self.get_all_matches()
-            
-            # Find the match
-            match_to_delete = None
-            for m in matches:
-                if m.get('match_id') == match_id:
-                    match_to_delete = m
-                    break
-            
-            if not match_to_delete:
+        """Delete a match by ID"""
+        with session_scope() as session:
+            # Extract numeric ID from match_id string
+            try:
+                numeric_id = int(match_id.replace('match_', ''))
+            except:
                 return False
             
-            # Remove from session
-            session_id = match_to_delete.get('session_id')
-            if session_id:
-                self._remove_match_from_session(session_id, match_id)
-            
-            # Remove match
-            matches = [m for m in matches if m.get('match_id') != match_id]
-            self._save_json(self.matches_file, matches)
-            
-            return True
-    
-    def _get_or_create_session_for_date_unlocked(self, session_date: date) -> Dict:
-        """
-        Internal method: Get or create a session for a specific date.
-        Does not acquire lock - caller must hold lock.
-        
-        Args:
-            session_date: Date for the session
-            
-        Returns:
-            Session dictionary
-        """
-        sessions = self._load_json(self.sessions_file)
-        session_id = self._get_session_id_for_date(session_date)
-        
-        # Check if session exists
-        if session_id in sessions:
-            return sessions[session_id]
-        
-        # Create new session
-        session = {
-            'session_id': session_id,
-            'date': session_date.isoformat(),
-            'match_ids': [],
-            'created_at': datetime.now().isoformat()
-        }
-        
-        sessions[session_id] = session
-        self._save_json(self.sessions_file, sessions)
-        
-        return session
+            match = session.query(MatchModel).filter_by(id=numeric_id).first()
+            if match:
+                session.delete(match)
+                return True
+            return False
     
     def get_or_create_session_for_date(self, session_date: date) -> Dict:
-        """
-        Get or create a session for a specific date.
+        """Get or create a session for a specific date"""
+        with session_scope() as session:
+            db_session = self._get_or_create_session_for_date(session_date, session)
+            return self._session_to_dict(db_session)
+    
+    def _get_or_create_session_for_date(self, session_date: date, session) -> Session:
+        """Internal helper to get or create session (within transaction)"""
+        db_session = session.query(Session)\
+            .filter(Session.session_date >= datetime.combine(session_date, datetime.min.time()))\
+            .filter(Session.session_date < datetime.combine(session_date, datetime.max.time()))\
+            .first()
         
-        Args:
-            session_date: Date for the session
-            
-        Returns:
-            Session dictionary
-        """
-        with self.lock:
-            return self._get_or_create_session_for_date_unlocked(session_date)
+        if not db_session:
+            db_session = Session(
+                session_date=datetime.combine(session_date, datetime.min.time()),
+                notes=None
+            )
+            session.add(db_session)
+            session.flush()
+        
+        return db_session
     
     def get_current_session(self) -> Dict:
-        """
-        Get or create today's session.
-        
-        Returns:
-            Current session dictionary
-        """
-        today = self._get_local_today()
+        """Get or create today's session"""
+        today = datetime.now().date()
         return self.get_or_create_session_for_date(today)
     
     def get_session(self, session_id: str) -> Optional[Dict]:
-        """
-        Get a specific session by ID.
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            Session dictionary or None if not found
-        """
-        sessions = self._load_json(self.sessions_file)
-        return sessions.get(session_id)
+        """Get a specific session by ID"""
+        with session_scope() as session:
+            # Handle both string and int session IDs
+            try:
+                if isinstance(session_id, str) and session_id.startswith('session_'):
+                    # Old format: session_YYYY-MM-DD
+                    # We need to find by date
+                    date_str = session_id.replace('session_', '')
+                    session_date = datetime.fromisoformat(date_str).date()
+                    db_session = session.query(Session)\
+                        .filter(Session.session_date >= datetime.combine(session_date, datetime.min.time()))\
+                        .filter(Session.session_date < datetime.combine(session_date, datetime.max.time()))\
+                        .first()
+                else:
+                    numeric_id = int(session_id)
+                    db_session = session.query(Session).filter_by(id=numeric_id).first()
+                
+                if db_session:
+                    return self._session_to_dict(db_session)
+            except:
+                pass
+            return None
     
     def get_all_sessions(self) -> List[Dict]:
-        """
-        Retrieve all sessions from history.
-        
-        Returns:
-            List of session dictionaries
-        """
-        sessions = self._load_json(self.sessions_file)
-        # Convert dict to list if needed, filtering out non-session entries
-        if isinstance(sessions, dict):
-            # Only return entries that have 'session_id' (are actual sessions)
-            return [v for k, v in sessions.items() if isinstance(v, dict) and 'session_id' in v]
-        return sessions
+        """Get all sessions"""
+        with session_scope() as session:
+            sessions = session.query(Session).all()
+            return [self._session_to_dict(s) for s in sessions]
     
     def get_session_matches(self, session_id: str) -> List[Dict]:
-        """
-        Get all matches belonging to a session.
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            List of match dictionaries
-        """
-        session = self.get_session(session_id)
-        if not session:
+        """Get all matches in a session"""
+        with session_scope() as session:
+            # Parse session ID
+            try:
+                if isinstance(session_id, str) and session_id.startswith('session_'):
+                    date_str = session_id.replace('session_', '')
+                    session_date = datetime.fromisoformat(date_str).date()
+                    db_session = session.query(Session)\
+                        .filter(Session.session_date >= datetime.combine(session_date, datetime.min.time()))\
+                        .filter(Session.session_date < datetime.combine(session_date, datetime.max.time()))\
+                        .first()
+                else:
+                    numeric_id = int(session_id)
+                    db_session = session.query(Session).filter_by(id=numeric_id).first()
+                
+                if db_session:
+                    return [self._match_to_dict(m) for m in db_session.matches]
+            except:
+                pass
             return []
-        
-        all_matches = self.get_all_matches()
-        match_ids = set(session.get('match_ids', []))
-        
-        return [m for m in all_matches if m.get('match_id') in match_ids]
-    
-    def _add_match_to_session(self, session_id: str, match_id: str):
-        """
-        Add a match ID to a session's match list.
-        Internal method - assumes lock is held.
-        
-        Args:
-            session_id: Session identifier
-            match_id: Match identifier
-        """
-        sessions = self._load_json(self.sessions_file)
-        
-        if session_id not in sessions:
-            # Session doesn't exist, shouldn't happen but handle gracefully
-            return
-        
-        if match_id not in sessions[session_id]['match_ids']:
-            sessions[session_id]['match_ids'].append(match_id)
-            self._save_json(self.sessions_file, sessions)
-    
-    def _remove_match_from_session(self, session_id: str, match_id: str):
-        """
-        Remove a match ID from a session's match list.
-        Internal method - assumes lock is held.
-        
-        Args:
-            session_id: Session identifier
-            match_id: Match identifier
-        """
-        sessions = self._load_json(self.sessions_file)
-        
-        if session_id in sessions and match_id in sessions[session_id]['match_ids']:
-            sessions[session_id]['match_ids'].remove(match_id)
-            self._save_json(self.sessions_file, sessions)
-    
-    def delete_session(self, session_id: str) -> Dict:
-        """
-        Delete a session and all its matches.
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            Dictionary with deletion info: {deleted_matches: count}
-        """
-        with self.lock:
-            sessions = self._load_json(self.sessions_file)
-            
-            if session_id not in sessions:
-                return {'deleted_matches': 0}
-            
-            # Get match IDs to delete
-            match_ids_to_delete = set(sessions[session_id].get('match_ids', []))
-            
-            # Remove matches
-            matches = self.get_all_matches()
-            matches = [m for m in matches if m.get('match_id') not in match_ids_to_delete]
-            self._save_json(self.matches_file, matches)
-            
-            # Remove session
-            del sessions[session_id]
-            self._save_json(self.sessions_file, sessions)
-            
-            return {'deleted_matches': len(match_ids_to_delete)}
     
     def get_sessions_summary(self) -> List[Dict]:
-        """
-        Get summary information for all sessions.
-        
-        Returns:
-            List of session summaries with date, match_count, and players
-        """
-        sessions = self.get_all_sessions()
-        all_matches = self.get_all_matches()
-        
-        # Create lookup for faster access
-        match_lookup = {m['match_id']: m for m in all_matches}
-        
-        summaries = []
-        for session in sessions:
-            match_ids = session.get('match_ids', [])
+        """Get summary information for all sessions"""
+        with session_scope() as session:
+            sessions = session.query(Session).order_by(Session.session_date.desc()).all()
             
-            # Get unique players from matches
-            players = set()
-            for match_id in match_ids:
-                match = match_lookup.get(match_id)
-                if match:
-                    players.update(match.get('team1', []))
-                    players.update(match.get('team2', []))
+            summaries = []
+            for sess in sessions:
+                # Get unique players from matches
+                players = set()
+                for match in sess.matches:
+                    players.add(match.team1_player1.username)
+                    players.add(match.team1_player2.username)
+                    players.add(match.team2_player1.username)
+                    players.add(match.team2_player2.username)
+                
+                summaries.append({
+                    'session_id': f'session_{sess.session_date.date()}',
+                    'date': sess.session_date.isoformat(),
+                    'match_count': len(sess.matches),
+                    'players': sorted(list(players))
+                })
             
-            summaries.append({
-                'session_id': session['session_id'],
-                'date': session['date'],
-                'match_count': len(match_ids),
-                'players': sorted(list(players))
-            })
+            # Filter out sessions with no matches
+            summaries = [s for s in summaries if s['match_count'] > 0]
+            return summaries
+    
+    def get_player_stats(self, player_name: str) -> Dict:
+        """Calculate statistics for a specific player"""
+        matches = self.get_matches_by_player(player_name)
         
-        # Sort by date descending
-        summaries.sort(key=lambda x: x['date'], reverse=True)
+        stats = {
+            'total_matches': len(matches),
+            'wins': 0,
+            'losses': 0,
+            'total_earnings': 0.0,
+            'total_winnings': 0.0,
+            'total_losses': 0.0,
+            'net_earnings': 0.0,
+            'partners': set(),
+            'opponents': set()
+        }
         
-        return summaries
+        for match in matches:
+            team1 = match.get('team1', [])
+            team2 = match.get('team2', [])
+            team1_score = match.get('team1_score', 0)
+            team2_score = match.get('team2_score', 0)
+            game_value = match.get('game_value', 0.0)
+            
+            on_team1 = player_name in team1
+            
+            # Track partners and opponents
+            if on_team1:
+                stats['partners'].update([p for p in team1 if p != player_name])
+                stats['opponents'].update(team2)
+                
+                if team1_score > team2_score:
+                    stats['wins'] += 1
+                    stats['total_winnings'] += game_value
+                elif team1_score < team2_score:
+                    stats['losses'] += 1
+                    stats['total_losses'] += game_value
+            else:
+                stats['partners'].update([p for p in team2 if p != player_name])
+                stats['opponents'].update(team1)
+                
+                if team2_score > team1_score:
+                    stats['wins'] += 1
+                    stats['total_winnings'] += game_value
+                elif team2_score < team1_score:
+                    stats['losses'] += 1
+                    stats['total_losses'] += game_value
+        
+        stats['net_earnings'] = stats['total_winnings'] - stats['total_losses']
+        stats['total_earnings'] = stats['net_earnings']  # Alias for compatibility
+        stats['partners'] = list(stats['partners'])
+        stats['opponents'] = list(stats['opponents'])
+        
+        if stats['total_matches'] > 0:
+            stats['win_rate'] = round(stats['wins'] / stats['total_matches'] * 100, 1)
+        else:
+            stats['win_rate'] = 0.0
+        
+        return stats
+    
+    def delete_session(self, session_id: str) -> Dict:
+        """Delete a session and all its matches"""
+        with session_scope() as session:
+            try:
+                if isinstance(session_id, str) and session_id.startswith('session_'):
+                    date_str = session_id.replace('session_', '')
+                    session_date = datetime.fromisoformat(date_str).date()
+                    db_session = session.query(Session)\
+                        .filter(Session.session_date >= datetime.combine(session_date, datetime.min.time()))\
+                        .filter(Session.session_date < datetime.combine(session_date, datetime.max.time()))\
+                        .first()
+                else:
+                    numeric_id = int(session_id)
+                    db_session = session.query(Session).filter_by(id=numeric_id).first()
+                
+                if db_session:
+                    match_count = len(db_session.matches)
+                    session.delete(db_session)  # Cascade will delete matches
+                    return {'deleted_matches': match_count}
+            except:
+                pass
+            return {'deleted_matches': 0}
+    
+    def _match_to_dict(self, match: MatchModel) -> Dict:
+        """Convert database Match to dict format compatible with old API"""
+        return {
+            'match_id': f'match_{match.id}',
+            'timestamp': match.created_at.isoformat() if match.created_at else datetime.now().isoformat(),
+            'session_id': f'session_{match.session.session_date.date()}' if match.session else 'unknown',
+            'game_number': match.game_number,
+            'team1': [match.team1_player1.username, match.team1_player2.username],
+            'team2': [match.team2_player1.username, match.team2_player2.username],
+            'team1_score': match.team1_score,
+            'team2_score': match.team2_score,
+            'game_value': match.game_value,
+            'winner': 'team1' if match.winner_team == 1 else 'team2'
+        }
+    
+    def _session_to_dict(self, sess: Session) -> Dict:
+        """Convert database Session to dict format compatible with old API"""
+        match_ids = [f'match_{m.id}' for m in sess.matches]
+        return {
+            'session_id': f'session_{sess.session_date.date()}',
+            'date': sess.session_date.date().isoformat(),
+            'match_ids': match_ids,
+            'created_at': sess.created_at.isoformat() if sess.created_at else datetime.now().isoformat()
+        }
+    
+    def migrate_matches_to_sessions(self):
+        """Migrate matches to sessions (no-op for database version)."""
+        # Already handled by database migration - this is a no-op for compatibility
+        pass
+    
+    def cleanup_all_empty_sessions(self) -> int:
+        """Remove all sessions that have no matches."""
+        with session_scope() as session:
+            # Find sessions with no matches
+            empty_sessions = session.query(Session).filter(
+                ~Session.matches.any()
+            ).all()
+            
+            count = len(empty_sessions)
+            for sess in empty_sessions:
+                session.delete(sess)
+            
+            return count
     
     def _compute_earnings(self, matches: List[Dict]) -> Dict[str, Dict]:
         """
@@ -444,80 +442,6 @@ class MatchStorage:
             player_stats[player]['total_losses'] = round(player_stats[player]['total_losses'], 2)
         
         return player_stats
-    
-    def get_player_stats(self, player_name: str) -> Dict:
-        """
-        Calculate statistics for a specific player.
-        
-        Args:
-            player_name: Name of the player
-            
-        Returns:
-            Dictionary with player statistics
-        """
-        matches = self.get_matches_by_player(player_name)
-        
-        # Use new earnings computation
-        earnings_data = self._compute_earnings(matches)
-        player_earnings = earnings_data.get(player_name, {
-            'games_played': 0,
-            'total_winnings': 0.0,
-            'total_losses': 0.0,
-            'net_earnings': 0.0
-        })
-        
-        stats = {
-            'total_matches': player_earnings['games_played'],
-            'wins': 0,
-            'losses': 0,
-            'total_earnings': player_earnings['net_earnings'],  # Now net earnings
-            'total_winnings': player_earnings['total_winnings'],
-            'total_losses': player_earnings['total_losses'],
-            'net_earnings': player_earnings['net_earnings'],
-            'partners': set(),
-            'opponents': set()
-        }
-        
-        for match in matches:
-            team1 = match.get('team1', [])
-            team2 = match.get('team2', [])
-            team1_score = match.get('team1_score')
-            team2_score = match.get('team2_score')
-            
-            # Determine if player was on team1 or team2
-            on_team1 = player_name in team1
-            
-            # Track partners and opponents
-            if on_team1:
-                stats['partners'].update([p for p in team1 if p != player_name])
-                stats['opponents'].update(team2)
-            else:
-                stats['partners'].update([p for p in team2 if p != player_name])
-                stats['opponents'].update(team1)
-            
-            # Track wins/losses if scores are available
-            if team1_score is not None and team2_score is not None:
-                if on_team1:
-                    if team1_score > team2_score:
-                        stats['wins'] += 1
-                    elif team1_score < team2_score:
-                        stats['losses'] += 1
-                else:
-                    if team2_score > team1_score:
-                        stats['wins'] += 1
-                    elif team2_score < team1_score:
-                        stats['losses'] += 1
-        
-        # Convert sets to lists for JSON serialization
-        stats['partners'] = list(stats['partners'])
-        stats['opponents'] = list(stats['opponents'])
-        
-        if stats['total_matches'] > 0:
-            stats['win_rate'] = round(stats['wins'] / stats['total_matches'] * 100, 1)
-        else:
-            stats['win_rate'] = 0.0
-        
-        return stats
     
     def get_session_player_stats(self, session_id: str) -> Dict[str, Dict]:
         """
@@ -632,197 +556,3 @@ class MatchStorage:
         earnings_list.sort(key=lambda x: x['net_earnings'], reverse=True)
         
         return earnings_list
-    
-    def clear_history(self):
-        """Clear all match and session history."""
-        if self.matches_file.exists():
-            self.matches_file.unlink()
-        if self.sessions_file.exists():
-            self.sessions_file.unlink()
-    
-    def export_to_csv(self, output_file: str):
-        """
-        Export match history to CSV format.
-        
-        Args:
-            output_file: Path to output CSV file
-        """
-        import csv
-        
-        matches = self.get_all_matches()
-        if not matches:
-            return
-        
-        with open(output_file, 'w', newline='') as f:
-            fieldnames = ['match_id', 'timestamp', 'team1', 'team2', 
-                         'team1_score', 'team2_score', 'game_value']
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            
-            writer.writeheader()
-            for match in matches:
-                row = {
-                    'match_id': match.get('match_id', ''),
-                    'timestamp': match.get('timestamp', ''),
-                    'team1': ' & '.join(match.get('team1', [])),
-                    'team2': ' & '.join(match.get('team2', [])),
-                    'team1_score': match.get('team1_score', ''),
-                    'team2_score': match.get('team2_score', ''),
-                    'game_value': match.get('game_value', '')
-                }
-                writer.writerow(row)
-    
-    def update_session_date(self, session_id: str, new_date: date, merge: bool = False) -> Dict:
-        """
-        Update the date of a session.
-        
-        Args:
-            session_id: Session identifier to update
-            new_date: New date for the session (date object)
-            merge: If True, merge with existing session on target date. If False, raise error on conflict.
-            
-        Returns:
-            Updated session dictionary
-            
-        Raises:
-            ValueError: If session not found or invalid date
-            KeyError: If date conflict exists and merge is False
-        """
-        with self.lock:
-            # Load sessions
-            sessions = self._load_json(self.sessions_file)
-            
-            # Check if source session exists
-            if session_id not in sessions:
-                raise ValueError(f"Session {session_id} not found")
-            
-            source_session = sessions[session_id]
-            current_date_str = source_session['date']
-            new_date_str = new_date.isoformat()
-            
-            # If date hasn't changed, return unchanged
-            if current_date_str == new_date_str:
-                return source_session
-            
-            # Generate new session ID for the new date
-            new_session_id = self._get_session_id_for_date(new_date)
-            
-            # Check if target session already exists
-            target_session_exists = new_session_id in sessions and new_session_id != session_id
-            
-            if target_session_exists:
-                if not merge:
-                    raise KeyError(f"A session already exists for date {new_date_str}. Set merge=True to combine sessions.")
-                
-                # MERGE MODE: Move all matches from source to target session
-                target_session = sessions[new_session_id]
-                source_match_ids = source_session.get('match_ids', [])
-                
-                # Load all matches to update their session_id
-                matches = self.get_all_matches()
-                
-                for match in matches:
-                    if match.get('match_id') in source_match_ids:
-                        # Update match to point to target session
-                        match['session_id'] = new_session_id
-                        
-                        # Add to target session's match_ids if not already there
-                        if match['match_id'] not in target_session['match_ids']:
-                            target_session['match_ids'].append(match['match_id'])
-                
-                # Save updated matches
-                self._save_json(self.matches_file, matches)
-                
-                # Delete source session
-                del sessions[session_id]
-                
-                # Save updated sessions
-                self._save_json(self.sessions_file, sessions)
-                
-                return target_session
-            
-            else:
-                # NO CONFLICT: Update session in place
-                # Load all matches to update their session_id
-                matches = self.get_all_matches()
-                source_match_ids = source_session.get('match_ids', [])
-                
-                for match in matches:
-                    if match.get('match_id') in source_match_ids:
-                        # Update match to point to new session_id
-                        match['session_id'] = new_session_id
-                
-                # Save updated matches
-                self._save_json(self.matches_file, matches)
-                
-                # Update session with new ID and date
-                updated_session = {
-                    'session_id': new_session_id,
-                    'date': new_date_str,
-                    'match_ids': source_session['match_ids'],
-                    'created_at': source_session.get('created_at', datetime.now().isoformat())
-                }
-                
-                # Remove old session and add updated one
-                del sessions[session_id]
-                sessions[new_session_id] = updated_session
-                
-                # Save updated sessions
-                self._save_json(self.sessions_file, sessions)
-                
-                return updated_session
-    
-    def migrate_matches_to_sessions(self):
-        """
-        Migrate existing matches to session-based storage.
-        Idempotent - can be run multiple times safely.
-        """
-        with self.lock:
-            matches = self.get_all_matches()
-            sessions = self._load_json(self.sessions_file)
-            
-            # Convert list to dict if needed (old format)
-            if isinstance(sessions, list):
-                sessions = {}
-            
-            migrated_count = 0
-            
-            for match in matches:
-                # Skip if already has session_id
-                if 'session_id' in match and match['session_id']:
-                    continue
-                
-                # Determine date from timestamp
-                timestamp = match.get('timestamp')
-                if timestamp:
-                    match_date = self._date_from_timestamp(timestamp)
-                else:
-                    # Fallback to today if no timestamp
-                    match_date = self._get_local_today()
-                
-                # Get or create session for this date
-                session_id = self._get_session_id_for_date(match_date)
-                
-                if session_id not in sessions:
-                    sessions[session_id] = {
-                        'session_id': session_id,
-                        'date': match_date.isoformat(),
-                        'match_ids': [],
-                        'created_at': datetime.now().isoformat()
-                    }
-                
-                # Add session_id to match
-                match['session_id'] = session_id
-                
-                # Add match to session if not already there
-                if match['match_id'] not in sessions[session_id]['match_ids']:
-                    sessions[session_id]['match_ids'].append(match['match_id'])
-                
-                migrated_count += 1
-            
-            # Save updated data
-            if migrated_count > 0:
-                self._save_json(self.matches_file, matches)
-                self._save_json(self.sessions_file, sessions)
-                print(f"Migrated {migrated_count} matches to sessions")
-            
-            return migrated_count
