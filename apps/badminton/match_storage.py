@@ -6,9 +6,16 @@ Maintains API compatibility with the original match_storage.py.
 """
 
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
 from database import session_scope
 from models import User, Session, Match as MatchModel
+
+_PACIFIC = ZoneInfo('America/Los_Angeles')
+
+def _now_pacific():
+    """Return current time in Pacific timezone as a naive datetime."""
+    return datetime.now(_PACIFIC).replace(tzinfo=None)
 
 
 class MatchStorage:
@@ -46,7 +53,7 @@ class MatchStorage:
                 db_session_id = match_data['session_id']
             else:
                 # Get today's session
-                today = datetime.now().date()
+                today = _now_pacific().date()
                 db_session_obj = self._get_or_create_session_for_date(today, session)
                 db_session_id = db_session_obj.id
             
@@ -86,7 +93,8 @@ class MatchStorage:
                 team2_score=match_data.get('team2_score', 0),
                 game_value=match_data.get('game_value', 0.0),
                 winner_team=winner_team,
-                mmr_change=match_data.get('mmr_change', 0.0)
+                mmr_change=match_data.get('mmr_change', 0.0),
+                player_no_bet_status=match_data.get('player_no_bet_status', {})
             )
             
             session.add(match)
@@ -169,7 +177,7 @@ class MatchStorage:
     
     def get_current_session(self) -> Dict:
         """Get or create today's session"""
-        today = datetime.now().date()
+        today = _now_pacific().date()
         return self.get_or_create_session_for_date(today)
     
     def get_session(self, session_id: str) -> Optional[Dict]:
@@ -336,7 +344,7 @@ class MatchStorage:
         """Convert database Match to dict format compatible with old API"""
         return {
             'match_id': f'match_{match.id}',
-            'timestamp': match.created_at.isoformat() if match.created_at else datetime.now().isoformat(),
+            'timestamp': match.created_at.isoformat() if match.created_at else _now_pacific().isoformat(),
             'session_id': f'session_{match.session.session_date.date()}' if match.session else 'unknown',
             'game_number': match.game_number,
             'team1': [match.team1_player1.username, match.team1_player2.username],
@@ -344,7 +352,8 @@ class MatchStorage:
             'team1_score': match.team1_score,
             'team2_score': match.team2_score,
             'game_value': match.game_value,
-            'winner': 'team1' if match.winner_team == 1 else 'team2'
+            'winner': 'team1' if match.winner_team == 1 else 'team2',
+            'player_no_bet_status': match.player_no_bet_status or {}
         }
     
     def _session_to_dict(self, sess: Session) -> Dict:
@@ -354,7 +363,7 @@ class MatchStorage:
             'session_id': f'session_{sess.session_date.date()}',
             'date': sess.session_date.date().isoformat(),
             'match_ids': match_ids,
-            'created_at': sess.created_at.isoformat() if sess.created_at else datetime.now().isoformat()
+            'created_at': sess.created_at.isoformat() if sess.created_at else _now_pacific().isoformat()
         }
     
     def migrate_matches_to_sessions(self):
@@ -416,20 +425,73 @@ class MatchStorage:
             
             # Calculate earnings/losses if scores are available
             if team1_score is not None and team2_score is not None:
+                # Get no-bet status for players in this match
+                no_bet_status = match.get('player_no_bet_status', {})
+                
                 if team1_score > team2_score:
-                    # Team 1 wins - each player gets full game_value
+                    # Team 1 wins, Team 2 loses
+                    no_bet_losers = [p for p in team2 if no_bet_status.get(p, False)]
+                    no_bet_winners = [p for p in team1 if no_bet_status.get(p, False)]
+                    
+                    # Calculate winnings for Team 1 (winners)
                     for player in team1:
-                        player_stats[player]['total_winnings'] += game_value
-                    # Team 2 loses - each player loses full game_value
+                        if no_bet_status.get(player, False):
+                            # No-bet player wins but gets $0
+                            pass
+                        else:
+                            # Normal player wins
+                            # If partner is no-bet OR opponent is no-bet, this player gets full value
+                            # (their partner doesn't take any, so they get it all)
+                            player_stats[player]['total_winnings'] += game_value
+                    
+                    # Calculate losses for Team 2 (losers)
                     for player in team2:
-                        player_stats[player]['total_losses'] += game_value
+                        if no_bet_status.get(player, False):
+                            # No-bet player loses but pays $0
+                            pass
+                        else:
+                            # Normal player loses
+                            if len(no_bet_winners) > 0:
+                                # If opponent has no-bet player, split the loss among remaining losers
+                                player_stats[player]['total_losses'] += game_value / 2
+                            elif len(no_bet_losers) > 0:
+                                # If partner is no-bet, this player pays full amount
+                                player_stats[player]['total_losses'] += game_value
+                            else:
+                                # Normal: both players pay full amount
+                                player_stats[player]['total_losses'] += game_value
+                            
                 elif team2_score > team1_score:
-                    # Team 2 wins - each player gets full game_value
+                    # Team 2 wins, Team 1 loses
+                    no_bet_losers = [p for p in team1 if no_bet_status.get(p, False)]
+                    no_bet_winners = [p for p in team2 if no_bet_status.get(p, False)]
+                    
+                    # Calculate winnings for Team 2 (winners)
                     for player in team2:
-                        player_stats[player]['total_winnings'] += game_value
-                    # Team 1 loses - each player loses full game_value
+                        if no_bet_status.get(player, False):
+                            # No-bet player wins but gets $0
+                            pass
+                        else:
+                            # Normal player wins
+                            # If partner is no-bet OR opponent is no-bet, this player gets full value
+                            player_stats[player]['total_winnings'] += game_value
+                    
+                    # Calculate losses for Team 1 (losers)
                     for player in team1:
-                        player_stats[player]['total_losses'] += game_value
+                        if no_bet_status.get(player, False):
+                            # No-bet player loses but pays $0
+                            pass
+                        else:
+                            # Normal player loses
+                            if len(no_bet_winners) > 0:
+                                # If opponent has no-bet player, split the loss among remaining losers
+                                player_stats[player]['total_losses'] += game_value / 2
+                            elif len(no_bet_losers) > 0:
+                                # If partner is no-bet, this player pays full amount
+                                player_stats[player]['total_losses'] += game_value
+                            else:
+                                # Normal: both players pay full amount
+                                player_stats[player]['total_losses'] += game_value
                 # If scores are equal, it's a tie - no earnings change
         
         # Calculate net earnings for each player
@@ -497,7 +559,7 @@ class MatchStorage:
             - net_earnings: total_winnings - total_losses
         """
         # Default to current month if not specified
-        now = datetime.now()
+        now = _now_pacific()
         if year is None:
             year = now.year
         if month is None:

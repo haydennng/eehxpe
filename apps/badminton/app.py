@@ -7,7 +7,14 @@ Main Flask application providing web UI and REST API for managing badminton matc
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session as flask_session
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from match_storage import MatchStorage
+
+_PACIFIC = ZoneInfo('America/Los_Angeles')
+
+def _now_pacific():
+    """Return current time in Pacific timezone as a naive datetime."""
+    return datetime.now(_PACIFIC).replace(tzinfo=None)
 from flask_httpauth import HTTPBasicAuth
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 import json
@@ -596,12 +603,115 @@ def profile_page():
     return render_template('profile.html', user=current_user)
 
 
+@app.route('/player/<username>')
+@login_required
+def public_player_profile(username):
+    """Public player profile page - view any player's stats."""
+    # Check if player exists
+    user = get_user_by_username(username)
+    if not user:
+        flash(f'Player {username} not found', 'danger')
+        return redirect(url_for('stats_page'))
+    
+    return render_template('player_public.html', player_username=username)
+
+
 @app.route('/api/profile', methods=['GET'])
 @login_required
 def get_profile():
     """Get current user's profile with stats."""
     stats = get_player_stats(current_user.id)
     return jsonify(stats)
+
+
+@app.route('/api/players/<username>/public-stats', methods=['GET'])
+@login_required
+def get_public_player_stats(username):
+    """Get any player's public stats by username."""
+    # Get user by username
+    user = get_user_by_username(username)
+    if not user:
+        return jsonify({'error': 'Player not found'}), 404
+    
+    # Get stats for this player
+    stats = get_player_stats(user.id)
+    if not stats:
+        return jsonify({'error': 'Stats not found'}), 404
+    
+    return jsonify(stats)
+
+
+@app.route('/api/players/<int:user_id>/partners', methods=['GET'])
+@login_required
+def get_player_partners(user_id):
+    """Get any player's partner statistics by user ID."""
+    from sqlalchemy import or_, func
+    from collections import defaultdict
+    
+    with session_scope() as session:
+        # Verify user exists
+        user = session.query(User).filter_by(id=user_id).first()
+        if not user:
+            return jsonify({'error': 'Player not found'}), 404
+        
+        # Get all matches for this user
+        matches = session.query(Match).filter(
+            or_(
+                Match.team1_player1_id == user_id,
+                Match.team1_player2_id == user_id,
+                Match.team2_player1_id == user_id,
+                Match.team2_player2_id == user_id
+            )
+        ).all()
+        
+        # Calculate partner stats
+        partner_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'total_games': 0})
+        
+        for match in matches:
+            # Find partner
+            partner_id = None
+            won = False
+            
+            if match.team1_player1_id == user_id:
+                partner_id = match.team1_player2_id
+                won = match.winner_team == 1
+            elif match.team1_player2_id == user_id:
+                partner_id = match.team1_player1_id
+                won = match.winner_team == 1
+            elif match.team2_player1_id == user_id:
+                partner_id = match.team2_player2_id
+                won = match.winner_team == 2
+            elif match.team2_player2_id == user_id:
+                partner_id = match.team2_player1_id
+                won = match.winner_team == 2
+            
+            if partner_id:
+                partner = session.query(User).filter_by(id=partner_id).first()
+                if partner:
+                    partner_stats[partner.username]['total_games'] += 1
+                    if won:
+                        partner_stats[partner.username]['wins'] += 1
+                    else:
+                        partner_stats[partner.username]['losses'] += 1
+        
+        # Convert to list, filter by min 5 games, and calculate win rates
+        result = []
+        for partner, stats in partner_stats.items():
+            if stats['total_games'] >= 5:  # Only include partners with 5+ games
+                win_rate = (stats['wins'] / stats['total_games'] * 100) if stats['total_games'] > 0 else 0
+                result.append({
+                    'partner': partner,
+                    'wins': stats['wins'],
+                    'losses': stats['losses'],
+                    'total_games': stats['total_games'],
+                    'win_rate': win_rate
+                })
+        
+        # Sort by win rate (descending) and limit to top 5
+        result.sort(key=lambda x: x['win_rate'], reverse=True)
+        result = result[:5]
+        
+        return jsonify(result)
 
 
 @app.route('/api/profile/partners', methods=['GET'])
@@ -670,6 +780,82 @@ def get_profile_partners():
         result = result[:5]
         
         return jsonify(result)
+
+
+@app.route('/api/players/<int:user_id>/opponents', methods=['GET'])
+@login_required
+def get_player_opponents(user_id):
+    """Get any player's opponent statistics by user ID."""
+    from sqlalchemy import or_
+    from collections import defaultdict
+    
+    with session_scope() as session:
+        # Verify user exists
+        user = session.query(User).filter_by(id=user_id).first()
+        if not user:
+            return jsonify({'error': 'Player not found'}), 404
+        
+        # Get all matches for this user
+        matches = session.query(Match).filter(
+            or_(
+                Match.team1_player1_id == user_id,
+                Match.team1_player2_id == user_id,
+                Match.team2_player1_id == user_id,
+                Match.team2_player2_id == user_id
+            )
+        ).all()
+        
+        # Calculate opponent stats
+        opponent_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'total_games': 0})
+        
+        for match in matches:
+            # Find opponents
+            opponent_ids = []
+            won = False
+            
+            if match.team1_player1_id == user_id or match.team1_player2_id == user_id:
+                # User on team 1 - opponents are team 2
+                opponent_ids = [match.team2_player1_id, match.team2_player2_id]
+                won = match.winner_team == 1
+            else:
+                # User on team 2 - opponents are team 1
+                opponent_ids = [match.team1_player1_id, match.team1_player2_id]
+                won = match.winner_team == 2
+            
+            for opp_id in opponent_ids:
+                opponent = session.query(User).filter_by(id=opp_id).first()
+                if opponent:
+                    opponent_stats[opponent.username]['total_games'] += 1
+                    if won:
+                        opponent_stats[opponent.username]['wins'] += 1
+                    else:
+                        opponent_stats[opponent.username]['losses'] += 1
+        
+        # Convert to lists and filter by minimum 5 games
+        all_opponents = []
+        for opponent, stats in opponent_stats.items():
+            if stats['total_games'] >= 5:  # Only include opponents with 5+ games
+                win_rate = (stats['wins'] / stats['total_games'] * 100) if stats['total_games'] > 0 else 0
+                loss_rate = (stats['losses'] / stats['total_games'] * 100) if stats['total_games'] > 0 else 0
+                all_opponents.append({
+                    'opponent': opponent,
+                    'wins': stats['wins'],
+                    'losses': stats['losses'],
+                    'total_games': stats['total_games'],
+                    'win_rate': win_rate,
+                    'loss_rate': loss_rate
+                })
+        
+        # Top 3 with highest loss rate (opponents you lose most against)
+        lost_against = sorted(all_opponents, key=lambda x: x['loss_rate'], reverse=True)[:3]
+        
+        # Top 3 with highest win rate (opponents you win most against)
+        won_against = sorted(all_opponents, key=lambda x: x['win_rate'], reverse=True)[:3]
+        
+        return jsonify({
+            'lost_against': lost_against,
+            'won_against': won_against
+        })
 
 
 @app.route('/api/profile/opponents', methods=['GET'])
@@ -809,8 +995,39 @@ def get_session():
 # Player endpoints
 @app.route('/api/players', methods=['GET'])
 def get_players():
-    """Get list of all players."""
-    return jsonify(session_state['players'])
+    """
+    Get list of all players with MMR from database.
+    
+    Returns player objects with name, active status, and MMR from database.
+    """
+    # Get session players (contains name, active, order, etc.)
+    players_list = session_state['players']
+    
+    # Enrich with MMR from database
+    enriched_players = []
+    with session_scope() as session:
+        for player in players_list:
+            player_name = player['name'] if isinstance(player, dict) else player
+            
+            # Get MMR from database
+            user = session.query(User).filter_by(username=player_name).first()
+            mmr = user.mmr if user else 1500.0
+            
+            # Create enriched player object
+            if isinstance(player, dict):
+                enriched_player = dict(player)  # Copy existing fields
+                enriched_player['mmr'] = mmr
+            else:
+                # Old string format - convert to object
+                enriched_player = {
+                    'name': player_name,
+                    'active': True,
+                    'mmr': mmr
+                }
+            
+            enriched_players.append(enriched_player)
+    
+    return jsonify(enriched_players)
 
 
 @app.route('/api/players', methods=['POST'])
@@ -871,7 +1088,7 @@ def delete_player(name):
 
 @app.route('/api/players/<name>/active', methods=['PATCH'])
 def toggle_player_active(name):
-    """Toggle a player's active status."""
+    """Toggle a player's active status and no-bet mode."""
     player = get_player_by_name(name)
     if not player:
         return jsonify({'error': 'Player not found'}), 404
@@ -882,6 +1099,10 @@ def toggle_player_active(name):
     
     # Update player active status
     player['active'] = data['active']
+    
+    # Update no_bet status if provided
+    if 'no_bet' in data and isinstance(data['no_bet'], bool):
+        player['no_bet'] = data['no_bet']
     
     with file_lock:
         save_session()
@@ -972,7 +1193,9 @@ def record_match():
     team1_score = data.get('team1_score')
     team2_score = data.get('team2_score')
     game_value = data.get('game_value')
+    player_no_bet_status = data.get('player_no_bet_status', {})
     print(f"Fields: team1={team1}, team2={team2}, scores={team1_score}/{team2_score}, value={game_value}")
+    print(f"No-bet status: {player_no_bet_status}")
     
     # Validate teams
     print("Validating teams...")
@@ -1035,7 +1258,8 @@ def record_match():
         'team1_score': team1_score,
         'team2_score': team2_score,
         'game_value': game_value,
-        'winner': 'team1' if team1_score > team2_score else 'team2'
+        'winner': 'team1' if team1_score > team2_score else 'team2',
+        'player_no_bet_status': player_no_bet_status
     }
     
     # Include session_id if provided (for adding to specific session)
@@ -1049,31 +1273,24 @@ def record_match():
     match_id = storage.save_match(match_data)
     print(f"Match saved with ID: {match_id}")
     
-    # Recalculate MMR after match is saved
-    print("Recalculating MMR...")
+    # Update MMR after match is saved
+    print("Updating MMR for match...")
     try:
-        from calculate_mmr import calculate_mmr_ratings, update_players_with_mmr
+        from mmr_database import update_mmr_for_match
         
-        player_ratings, history, players_data = calculate_mmr_ratings(
-            matches_file=MATCHES_FILE,
-            players_file=PLAYERS_FILE,
-            k_factor=24,
-            build_history=False
-        )
+        # Extract numeric ID from match_id string (format: "match_123")
+        numeric_match_id = int(match_id.replace('match_', ''))
         
-        update_players_with_mmr(
-            players_data,
-            player_ratings,
-            PLAYERS_FILE,
-            write=True
-        )
+        # Calculate and update MMR for all players in this match
+        rating_changes, mmr_change = update_mmr_for_match(numeric_match_id, k_factor=24)
         
-        # Reload session to pick up new MMR values
-        load_session()
-        print("MMR recalculated successfully")
+        print(f"MMR updated successfully. Changes: {rating_changes}")
+        print(f"MMR change value: {mmr_change}")
     except Exception as e:
-        print(f"Warning: Failed to recalculate MMR: {e}")
-        # Don't fail the match save if MMR fails
+        import traceback
+        print(f"Warning: Failed to update MMR: {e}")
+        traceback.print_exc()
+        # Don't fail the match save if MMR update fails
     
     # Get the saved match to return
     print("Loading all matches...")
@@ -1162,26 +1379,19 @@ def update_match(match_id):
             json.dump(matches, f, indent=2)
     
     # Recalculate MMR after match update
+    # Since match details changed, we need to recalculate all MMR from scratch
+    print(f"Match {match_id} updated, recalculating all MMR...")
     try:
-        from calculate_mmr import calculate_mmr_ratings, update_players_with_mmr
+        from mmr_database import recalculate_all_mmr
         
-        player_ratings, history, players_data = calculate_mmr_ratings(
-            matches_file=MATCHES_FILE,
-            players_file=PLAYERS_FILE,
-            k_factor=24,
-            build_history=False
-        )
+        # Recalculate MMR for all players from all matches
+        player_ratings = recalculate_all_mmr(k_factor=24)
         
-        update_players_with_mmr(
-            players_data,
-            player_ratings,
-            PLAYERS_FILE,
-            write=True
-        )
-        
-        load_session()
+        print(f"MMR recalculated successfully for {len(player_ratings)} players")
     except Exception as e:
+        import traceback
         print(f"Warning: Failed to recalculate MMR after edit: {e}")
+        traceback.print_exc()
     
     return jsonify(match_to_update)
 
@@ -1189,34 +1399,44 @@ def update_match(match_id):
 @app.route('/api/matches/<match_id>', methods=['DELETE'])
 @admin_required
 def delete_match(match_id):
-    """Delete a match (admin only)."""
+    """
+    Delete a match (admin only).
+    
+    After deletion, recalculates all MMR from scratch to ensure accuracy.
+    This is necessary because ELO ratings depend on the chronological order
+    of matches, so removing a match requires replaying all remaining matches.
+    """
+    print(f"\n=== DELETE /api/matches/{match_id} called ===")
+    
     success = storage.delete_match(match_id)
     
     if not success:
+        print(f"Match {match_id} not found")
         return jsonify({'error': 'Match not found'}), 404
     
-    # Recalculate MMR after match deletion
-    try:
-        from calculate_mmr import calculate_mmr_ratings, update_players_with_mmr
-        
-        player_ratings, history, players_data = calculate_mmr_ratings(
-            matches_file=MATCHES_FILE,
-            players_file=PLAYERS_FILE,
-            k_factor=24,
-            build_history=False
-        )
-        
-        update_players_with_mmr(
-            players_data,
-            player_ratings,
-            PLAYERS_FILE,
-            write=True
-        )
-        
-        load_session()
-    except Exception as e:
-        print(f"Warning: Failed to recalculate MMR after delete: {e}")
+    print(f"Match {match_id} deleted from database")
     
+    # Recalculate ALL MMR from scratch after match deletion
+    # This ensures MMR accurately reflects the remaining match history
+    print("Recalculating all MMR from remaining matches...")
+    try:
+        from mmr_database import recalculate_all_mmr
+        
+        # Recalculate MMR for all players from all remaining matches
+        player_ratings = recalculate_all_mmr(k_factor=24)
+        
+        print(f"MMR recalculated successfully for {len(player_ratings)} players")
+        print("Sample new ratings:")
+        for player, rating in list(player_ratings.items())[:5]:
+            print(f"  {player}: {rating:.2f}")
+    
+    except Exception as e:
+        import traceback
+        print(f"Warning: Failed to recalculate MMR after delete: {e}")
+        traceback.print_exc()
+        # Don't fail the delete if MMR recalculation fails
+    
+    print(f"=== Match {match_id} deletion complete ===\n")
     return jsonify({'message': 'Match deleted successfully', 'match_id': match_id})
 
 
@@ -1382,48 +1602,62 @@ def delete_session(session_id):
     })
 
 
+@app.route('/api/sessions/cleanup', methods=['POST'])
+@admin_required
+def cleanup_empty_sessions():
+    """Delete all sessions with no games (admin only)."""
+    deleted_count = storage.cleanup_all_empty_sessions()
+    return jsonify({
+        'message': 'Empty sessions cleaned up',
+        'deleted_count': deleted_count
+    })
+
+
 # Stats endpoint
 @app.route('/api/stats', methods=['GET'])
+@login_required
 def get_stats():
-    """Get player statistics."""
-    # Extract player names from session_state (which contains player objects)
-    all_players = set()
-    for p in session_state['players']:
-        player_name = p['name'] if isinstance(p, dict) else p
-        all_players.add(player_name)
+    """
+    Get player statistics from database.
     
-    # Also include players from match history
-    matches = storage.get_all_matches()
-    for match in matches:
-        all_players.update(match.get('team1', []))
-        all_players.update(match.get('team2', []))
+    IMPORTANT: This endpoint now reads from the database, not JSON files.
+    It returns comprehensive stats including MMR from the User table.
+    """
+    from player_stats import get_all_players_stats
     
-    stats_list = []
-    for player in all_players:
-        stats = storage.get_player_stats(player)
-        # Get MMR from player data
-        player_obj = get_player_by_name(player)
-        mmr = player_obj.get('mmr', 1500) if player_obj else 1500
+    try:
+        # Get all player stats from database
+        stats_list = get_all_players_stats()
         
-        stats_list.append({
-            'player': player,
-            'total_matches': stats['total_matches'],
-            'wins': stats['wins'],
-            'losses': stats['losses'],
-            'win_rate': stats['win_rate'],
-            'earnings': stats['total_earnings'],  # Now net earnings
-            'net_earnings': stats['net_earnings'],
-            'total_winnings': stats['total_winnings'],
-            'total_losses': stats['total_losses'],
-            'partners': ', '.join(stats['partners']),
-            'opponents': ', '.join(stats['opponents']),
-            'mmr': mmr
-        })
+        # Transform to match expected format for frontend
+        # (get_all_players_stats returns different field names)
+        transformed = []
+        for player_stat in stats_list:
+            transformed.append({
+                'player': player_stat['username'],
+                'total_matches': player_stat['total_matches'],
+                'wins': player_stat['wins'],
+                'losses': player_stat['losses'],
+                'win_rate': player_stat['win_rate'],
+                'earnings': player_stat['net_earnings'],
+                'net_earnings': player_stat['net_earnings'],
+                'total_winnings': player_stat['total_winnings'],
+                'total_losses': player_stat['total_losses'],
+                'partners': ', '.join(player_stat.get('partners', [])),
+                'opponents': ', '.join(player_stat.get('opponents', [])),
+                'mmr': player_stat['mmr']  # MMR from database
+            })
+        
+        # Sort by total matches (most active first)
+        transformed.sort(key=lambda x: x['total_matches'], reverse=True)
+        
+        return jsonify(transformed)
     
-    # Sort by total matches (most active first)
-    stats_list.sort(key=lambda x: x['total_matches'], reverse=True)
-    
-    return jsonify(stats_list)
+    except Exception as e:
+        import traceback
+        print(f"Error in /api/stats: {e}")
+        traceback.print_exc()
+        return jsonify({'error': 'Failed to load stats'}), 500
 
 
 @app.route('/api/earnings', methods=['GET'])
@@ -1457,82 +1691,14 @@ def get_monthly_earnings():
         year (int, optional): Year (defaults to current year)
         month (int, optional): Month 1-12 (defaults to current month)
     """
-    from collections import defaultdict
-    from sqlalchemy import extract
-    
     # Get optional query params
     year = request.args.get('year', type=int)
     month = request.args.get('month', type=int)
     
-    # Default to current month if not specified
-    now = datetime.now()
-    if year is None:
-        year = now.year
-    if month is None:
-        month = now.month
+    # Use match_storage's no-bet aware monthly earnings calculation
+    earnings_list = storage.get_monthly_player_earnings(year, month)
     
-    with session_scope() as db_session:
-        # Query matches for the specific month/year using created_at timestamp
-        # Use joinedload to eagerly load player relationships
-        from sqlalchemy.orm import joinedload
-        matches = db_session.query(Match).options(
-            joinedload(Match.team1_player1),
-            joinedload(Match.team1_player2),
-            joinedload(Match.team2_player1),
-            joinedload(Match.team2_player2)
-        ).filter(
-            extract('year', Match.created_at) == year,
-            extract('month', Match.created_at) == month
-        ).all()
-        
-        # Calculate earnings per player
-        earnings_dict = defaultdict(lambda: {
-            'games_played': 0,
-            'total_winnings': 0.0,
-            'total_losses': 0.0
-        })
-        
-        for match in matches:
-            # Get player usernames
-            team1_p1 = match.team1_player1.username
-            team1_p2 = match.team1_player2.username
-            team2_p1 = match.team2_player1.username
-            team2_p2 = match.team2_player2.username
-            
-            # Update games played
-            for player in [team1_p1, team1_p2, team2_p1, team2_p2]:
-                earnings_dict[player]['games_played'] += 1
-            
-            # Update earnings based on winner
-            if match.winner_team == 1:
-                # Team 1 won
-                earnings_dict[team1_p1]['total_winnings'] += match.game_value
-                earnings_dict[team1_p2]['total_winnings'] += match.game_value
-                earnings_dict[team2_p1]['total_losses'] += match.game_value
-                earnings_dict[team2_p2]['total_losses'] += match.game_value
-            else:
-                # Team 2 won
-                earnings_dict[team2_p1]['total_winnings'] += match.game_value
-                earnings_dict[team2_p2]['total_winnings'] += match.game_value
-                earnings_dict[team1_p1]['total_losses'] += match.game_value
-                earnings_dict[team1_p2]['total_losses'] += match.game_value
-        
-        # Convert to list and calculate net earnings
-        earnings_list = []
-        for player, stats in earnings_dict.items():
-            net_earnings = stats['total_winnings'] - stats['total_losses']
-            earnings_list.append({
-                'player': player,
-                'games_played': stats['games_played'],
-                'total_winnings': round(stats['total_winnings'], 2),
-                'total_losses': round(stats['total_losses'], 2),
-                'net_earnings': round(net_earnings, 2)
-            })
-        
-        # Sort by net earnings descending
-        earnings_list.sort(key=lambda x: x['net_earnings'], reverse=True)
-        
-        return jsonify(earnings_list)
+    return jsonify(earnings_list)
 
 
 @app.route('/api/mmr/monthly', methods=['GET'])
@@ -1553,7 +1719,7 @@ def get_monthly_mmr_changes():
         
         # Default to current year/month if not provided
         if not year or not month:
-            now = datetime.now()
+            now = _now_pacific()
             year = year or now.year
             month = month or now.month
         
@@ -1822,88 +1988,34 @@ def get_player_session_matches(player_name):
 @app.route('/api/sessions/<session_id>/earnings', methods=['GET'])
 @login_required
 def get_session_earnings(session_id):
-    """Get player earnings/losses for a specific session from database."""
-    from collections import defaultdict
-    from models import Session as SessionModel
-    from datetime import datetime as dt
+    """Get player earnings/losses for a specific session."""
+    # Use match_storage's no-bet aware earnings calculation
+    earnings_dict = storage.get_session_player_stats(session_id)
     
-    # Parse session_id format: "session_YYYY-MM-DD"
-    if not session_id.startswith('session_'):
-        return jsonify({'error': 'Invalid session_id format'}), 400
-    
-    date_str = session_id.replace('session_', '')
-    try:
-        session_date = dt.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return jsonify({'error': 'Invalid date format in session_id'}), 400
-    
-    with session_scope() as db_sess:
-        from sqlalchemy.orm import joinedload
-        # Find session by date
-        db_session = db_sess.query(SessionModel).filter(
-            SessionModel.session_date == dt.combine(session_date, dt.min.time())
-        ).first()
-        
-        if not db_session:
+    if not earnings_dict:
+        # Check if session exists
+        session = storage.get_session(session_id)
+        if not session:
             return jsonify({'error': 'Session not found'}), 404
-        
-        # Get matches for this session with eager loading
-        matches = db_sess.query(Match).options(
-            joinedload(Match.team1_player1),
-            joinedload(Match.team1_player2),
-            joinedload(Match.team2_player1),
-            joinedload(Match.team2_player2)
-        ).filter(Match.session_id == db_session.id).all()
-        
-        # Calculate earnings per player
-        earnings_dict = defaultdict(lambda: {
-            'games_played': 0,
-            'total_winnings': 0.0,
-            'total_losses': 0.0
+    
+    # Convert to list
+    earnings_list = []
+    for player, stats in earnings_dict.items():
+        earnings_list.append({
+            'player': player,
+            'games_played': stats['games_played'],
+            'total_winnings': stats['total_winnings'],
+            'total_losses': stats['total_losses'],
+            'net_earnings': stats['net_earnings']
         })
-        
-        for match in matches:
-            # Get player usernames
-            team1_p1 = match.team1_player1.username
-            team1_p2 = match.team1_player2.username
-            team2_p1 = match.team2_player1.username
-            team2_p2 = match.team2_player2.username
-            
-            # Update games played
-            for player in [team1_p1, team1_p2, team2_p1, team2_p2]:
-                earnings_dict[player]['games_played'] += 1
-            
-            # Update earnings based on winner
-            if match.winner_team == 1:
-                earnings_dict[team1_p1]['total_winnings'] += match.game_value
-                earnings_dict[team1_p2]['total_winnings'] += match.game_value
-                earnings_dict[team2_p1]['total_losses'] += match.game_value
-                earnings_dict[team2_p2]['total_losses'] += match.game_value
-            else:
-                earnings_dict[team2_p1]['total_winnings'] += match.game_value
-                earnings_dict[team2_p2]['total_winnings'] += match.game_value
-                earnings_dict[team1_p1]['total_losses'] += match.game_value
-                earnings_dict[team1_p2]['total_losses'] += match.game_value
-        
-        # Convert to list
-        earnings_list = []
-        for player, stats in earnings_dict.items():
-            net_earnings = stats['total_winnings'] - stats['total_losses']
-            earnings_list.append({
-                'player': player,
-                'games_played': stats['games_played'],
-                'total_winnings': round(stats['total_winnings'], 2),
-                'total_losses': round(stats['total_losses'], 2),
-                'net_earnings': round(net_earnings, 2)
-            })
-        
-        # Sort by net earnings descending
-        earnings_list.sort(key=lambda x: x['net_earnings'], reverse=True)
-        
-        return jsonify({
-            'session_id': session_id,
-            'players': earnings_list
-        })
+    
+    # Sort by net earnings descending
+    earnings_list.sort(key=lambda x: x['net_earnings'], reverse=True)
+    
+    return jsonify({
+        'session_id': session_id,
+        'players': earnings_list
+    })
 
 
 @app.route('/api/sessions/<session_id>/stats', methods=['GET'])
@@ -2019,19 +2131,31 @@ def get_session_stats(session_id):
 def get_recommendations():
     """Get recommended matchups based on current session partnership history.
     
-    Supports dual-court mode when 8+ active players are available.
-    Returns single matchup for <8 players, dual matchup for 8+ players.
+    Supports multi-court mode based on active player count.
     
     Query params:
         exclude_ids: Comma-separated player names to exclude (for cycling)
+        current_courts: JSON array of current court assignments [{"court": 1, "players": ["A", "B", "C", "D"]}, ...]
     """
     from collections import Counter, defaultdict
     import itertools
     import random
+    import json
     from flask import request
     
     # Get only active players
     all_active_players = get_active_players()
+    
+    # Parse current_courts parameter to track who's currently playing
+    current_courts_param = request.args.get('current_courts', '[]')
+    try:
+        current_courts_data = json.loads(current_courts_param)
+        currently_playing_players = set()
+        for court_data in current_courts_data:
+            players_on_court = court_data.get('players', [])
+            currently_playing_players.update(players_on_court)
+    except (json.JSONDecodeError, TypeError):
+        currently_playing_players = set()
     
     # Get current session and its matches FIRST (to count games before filtering)
     current_session = storage.get_current_session()
@@ -2099,12 +2223,14 @@ def get_recommendations():
         win_rate = (wins / total_matches * 100) if total_matches > 0 else 50.0
         player_win_rates[player] = win_rate
     
-    # Determine if dual-court mode (8+ active players available)
-    is_dual_court = len(all_active_players) >= 8
+    # Determine number of courts needed based on active players
+    # 1 court per 4 players: 4-7=1 court, 8-11=2 courts, 12-15=3 courts, etc.
+    num_courts = max(1, len(all_active_players) // 4)
+    is_multi_court = num_courts > 1
     
-    # For dual-court mode, ALWAYS use all active players (ignore exclude_ids)
+    # For multi-court mode, ALWAYS use all active players (ignore exclude_ids)
     # For single-court mode, handle exclude_ids for cycling
-    if is_dual_court:
+    if is_multi_court:
         players = all_active_players
     else:
         # Single-court mode: handle exclude_ids parameter for cycling
@@ -2145,15 +2271,26 @@ def get_recommendations():
             return f"×{count}"
     
     def calculate_sitout_penalty(players_in_matchup):
-        """Calculate penalty for players sitting out, especially consecutive sit-outs."""
+        """Calculate penalty for players sitting out >1 round.
+        
+        Priority 1 (HIGHEST): Players not currently playing AND sat out last game
+        These players MUST be included in recommendations to avoid sitting 2+ rounds.
+        """
         playing_players = set(players_in_matchup)
         sitting_players = set(all_active_players) - playing_players
         
         penalty = 0
         for player in sitting_players:
-            # HEAVY penalty if player sat out the last game (would be sitting 2 games in a row)
-            if player not in last_game_players:
-                penalty += 1000  # Massive penalty to strongly avoid consecutive sit-outs
+            # Check if player is sitting for >1 round:
+            # - Not in this matchup (would be sitting)
+            # - Not currently on any court (already sitting this round)
+            # - Was not in last game (sat out last round)
+            if player not in currently_playing_players and player not in last_game_players:
+                # MASSIVE penalty - this player would be sitting 2+ rounds in a row
+                penalty += 10000  # Must include these players
+            elif player not in last_game_players:
+                # HEAVY penalty if player sat out the last game (would be sitting 2 games in a row)
+                penalty += 1000
         
         # Also add small penalty for each player sitting (but much less than consecutive)
         penalty += len(sitting_players) * 10
@@ -2252,21 +2389,27 @@ def get_recommendations():
                 # Calculate John balance penalty (if John is in this matchup)
                 john_penalty = calculate_john_balance_penalty([p1, p2, p3, p4])
                 
-                # Score tuple with priorities:
-                # 1. Sit-out penalty (HIGHEST - never sit out twice in a row)
-                # 2. Partnership variety (new partnerships)
-                # 3. Games balance (ensure everyone plays similar amount)
-                # 4. John's with/against balance (fairness for lowest MMR player)
-                # 5. Win rate balance (weighted at 2)
-                # 6. Same-court variety (minimize playing together)
+                # Calculate opponent diversity scores
+                opponent_score = 0
+                for p_a in team_a:
+                    for p_o in team_b:
+                        opponent_score += opponent_counts.get(p_a, Counter()).get(p_o, 0)
+                
+                # Score tuple with NEW priorities:
+                # 1. Sit-out penalty (HIGHEST - never sit out >1 round)
+                # 2. Partnership variety (partner diversity - minimize repeats)
+                # 3. Opponent variety (opponent diversity - minimize repeats)
+                # 4. Games balance
+                # 5. Win rate balance
+                # 6. Same-court variety
                 score = (
-                    sitout_penalty,          # Sit-out penalty (priority 1 - HIGHEST)
-                    max(count_a, count_b),  # Worst partnership count (priority 2)
-                    games_balance,           # Balance of total games played (priority 3)
-                    john_penalty,            # John's with/against balance (priority 4)
-                    count_a + count_b,       # Total partnership count (priority 5)
-                    win_rate_diff * 2,       # Win rate imbalance penalty (priority 6, weighted at 2)
-                    same_court_score,        # Same-court penalty (priority 7)
+                    sitout_penalty,          # Priority 1 (HIGHEST): Sitting >1 round
+                    max(count_a, count_b),  # Priority 2: Worst partnership repeat count
+                    count_a + count_b,       # Priority 3: Total partnership repeats
+                    opponent_score,          # Priority 4: Opponent diversity (minimize repeats)
+                    games_balance,           # Priority 5: Balance of total games played
+                    win_rate_diff * 2,       # Priority 6: Win rate balance (weighted at 2)
+                    same_court_score,        # Priority 7: Same-court variety
                     sorted([p1, p2, p3, p4]) # Deterministic tiebreaker
                 )
                 
@@ -2286,63 +2429,59 @@ def get_recommendations():
         all_matchups.sort(key=lambda x: x['score'])
         return all_matchups[0]
     
-    if is_dual_court:
-        # DUAL-COURT MODE: Generate 2 separate matchups
-        # For cycling: shuffle ALL players and take first 8 to ensure rotation
+    if is_multi_court:
+        # MULTI-COURT MODE: Generate N separate matchups based on player count
+        # For cycling: shuffle ALL players to ensure rotation
         shuffled_players = players[:]
         random.shuffle(shuffled_players)
         
-        # Take only first 8 players from shuffled list to force rotation
-        selected_8 = shuffled_players[:8]
+        # Calculate how many players we need (4 per court)
+        players_needed = num_courts * 4
+        selected_players = shuffled_players[:players_needed]
         
-        # Validate we have exactly 8 players for dual court
-        if len(selected_8) < 8:
-            return jsonify({'error': 'Not enough players for dual court mode'}), 400
+        # Validate we have enough players
+        if len(selected_players) < players_needed:
+            return jsonify({'error': f'Not enough players for {num_courts} courts'}), 400
         
-        # First matchup: best from first 4 of selected 8
-        first_matchup = generate_matchup_for_players(selected_8[:4], partnership_counts, total_games)
+        # Generate matchups for each court
+        court_matchups = []
+        player_ids = []
         
-        if not first_matchup:
-            return '', 204  # No Content
+        for court_num in range(1, num_courts + 1):
+            # Get 4 players for this court
+            court_start = (court_num - 1) * 4
+            court_end = court_num * 4
+            court_players = selected_players[court_start:court_end]
+            
+            # Generate best matchup for these 4 players
+            matchup = generate_matchup_for_players(court_players, partnership_counts, total_games)
+            
+            if not matchup:
+                return '', 204  # No Content
+            
+            # Build court explanation
+            court_explanation = f"{matchup['team_a'][0]}/{matchup['team_a'][1]} {format_count(matchup['count_a'])} vs {matchup['team_b'][0]}/{matchup['team_b'][1]} {format_count(matchup['count_b'])}"
+            
+            court_matchups.append({
+                'court': court_num,
+                'team_a': matchup['team_a'],
+                'team_b': matchup['team_b'],
+                'explanation': court_explanation
+            })
+            
+            # Add player IDs in order: Team A, Team B
+            player_ids.extend(matchup['team_a'])
+            player_ids.extend(matchup['team_b'])
         
-        # Second matchup: use the remaining 4 from selected 8
-        second_matchup = generate_matchup_for_players(selected_8[4:8], partnership_counts, total_games)
+        return jsonify({
+            'multi_court': True,
+            'num_courts': num_courts,
+            'matchups': court_matchups,
+            'player_ids': player_ids,
+            'current_index': 0
+        })
         
-        if second_matchup:
-                # Build dual-court response
-                court1_explanation = f"{first_matchup['team_a'][0]}/{first_matchup['team_a'][1]} {format_count(first_matchup['count_a'])} vs {first_matchup['team_b'][0]}/{first_matchup['team_b'][1]} {format_count(first_matchup['count_b'])}"
-                court2_explanation = f"{second_matchup['team_a'][0]}/{second_matchup['team_a'][1]} {format_count(second_matchup['count_a'])} vs {second_matchup['team_b'][0]}/{second_matchup['team_b'][1]} {format_count(second_matchup['count_b'])}"
-                
-                # Player IDs in court order: Court 1 (Team A, Team B), Court 2 (Team A, Team B)
-                player_ids = (
-                    first_matchup['team_a'] + 
-                    first_matchup['team_b'] + 
-                    second_matchup['team_a'] + 
-                    second_matchup['team_b']
-                )
-                
-                return jsonify({
-                    'dual_court': True,
-                    'matchups': [
-                        {
-                            'court': 1,
-                            'team_a': first_matchup['team_a'],
-                            'team_b': first_matchup['team_b'],
-                            'explanation': court1_explanation
-                        },
-                        {
-                            'court': 2,
-                            'team_a': second_matchup['team_a'],
-                            'team_b': second_matchup['team_b'],
-                            'explanation': court2_explanation
-                        }
-                    ],
-                    'player_ids': player_ids,
-                    'current_index': 0
-                })
-        
-        # Fallback to single-court if we can't make 2 matchups
-        # (This shouldn't happen if is_dual_court is true, but handle gracefully)
+        # Note: Keeping 'dual_court' for backward compatibility will be handled by frontend
     
     # SINGLE-COURT MODE: Generate 1 matchup (original behavior)
     best_matchup = generate_matchup_for_players(players, partnership_counts, total_games)
@@ -2391,14 +2530,20 @@ def get_recommendations():
                 # Calculate John balance penalty for alternatives
                 john_penalty = calculate_john_balance_penalty([p1, p2, p3, p4])
                 
+                # Calculate opponent diversity for alternatives
+                opponent_score_alt = 0
+                for p_a in team_a:
+                    for p_o in team_b:
+                        opponent_score_alt += opponent_counts.get(p_a, Counter()).get(p_o, 0)
+                
                 score = (
-                    sitout_penalty,           # Sit-out penalty (HIGHEST priority)
-                    max(count_a, count_b),   # Worst partnership count
-                    games_balance,            # Balance of total games played
-                    john_penalty,             # John's with/against balance
-                    count_a + count_b,        # Total partnership count
-                    win_rate_diff * 2,        # Win rate imbalance penalty (weighted at 2)
-                    same_court_score,         # Same-court penalty
+                    sitout_penalty,           # Priority 1: Sitting >1 round
+                    max(count_a, count_b),   # Priority 2: Worst partnership repeat count
+                    count_a + count_b,        # Priority 3: Total partnership repeats
+                    opponent_score_alt,       # Priority 4: Opponent diversity
+                    games_balance,            # Priority 5: Balance of total games played
+                    win_rate_diff * 2,        # Priority 6: Win rate balance (weighted at 2)
+                    same_court_score,         # Priority 7: Same-court variety
                     sorted([p1, p2, p3, p4])  # Deterministic tiebreaker
                 )
                 all_matchups_for_alternatives.append({
@@ -2445,14 +2590,20 @@ def get_recommendations():
                 # Calculate John balance penalty for alternatives
                 john_penalty = calculate_john_balance_penalty([p1, p2, p3, p4])
                 
+                # Calculate opponent diversity for alternatives
+                opponent_score_alt2 = 0
+                for p_a in team_a:
+                    for p_o in team_b:
+                        opponent_score_alt2 += opponent_counts.get(p_a, Counter()).get(p_o, 0)
+                
                 score = (
-                    sitout_penalty,           # Sit-out penalty (HIGHEST priority)
-                    max(count_a, count_b),   # Worst partnership count
-                    games_balance,            # Balance of total games played
-                    john_penalty,             # John's with/against balance
-                    count_a + count_b,        # Total partnership count
-                    win_rate_diff * 2,        # Win rate imbalance penalty (weighted at 2)
-                    same_court_score,         # Same-court penalty
+                    sitout_penalty,           # Priority 1: Sitting >1 round
+                    max(count_a, count_b),   # Priority 2: Worst partnership repeat count
+                    count_a + count_b,        # Priority 3: Total partnership repeats
+                    opponent_score_alt2,      # Priority 4: Opponent diversity
+                    games_balance,            # Priority 5: Balance of total games played
+                    win_rate_diff * 2,        # Priority 6: Win rate balance (weighted at 2)
+                    same_court_score,         # Priority 7: Same-court variety
                     sorted([p1, p2, p3, p4])  # Deterministic tiebreaker
                 )
                 all_matchups_for_alternatives.append({
@@ -2493,46 +2644,267 @@ def get_recommendations():
     })
 
 
+@app.route('/api/recommendations/court', methods=['GET'])
+def get_court_recommendation():
+    """Get a single court recommendation for 4 players.
+    
+    Uses the same recommendation algorithm as main recommendations.
+    Can include players already assigned to other courts.
+    Excludes matchups that are already assigned to other courts.
+    
+    Query params:
+        exclude_partnerships (JSON string): List of partnerships to exclude (as sorted player arrays)
+        exclude_players (JSON string): List of individual players to exclude from recommendations
+    
+    Returns a single matchup for 4 players.
+    """
+    from collections import Counter, defaultdict
+    import itertools
+    import random
+    import json
+    from flask import request
+    
+    # Get excluded partnerships from query params
+    excluded_partnerships_param = request.args.get('exclude_partnerships', '[]')
+    try:
+        excluded_partnerships = json.loads(excluded_partnerships_param)
+        # Convert to frozensets for fast lookup
+        excluded_partnership_sets = [frozenset(partnership) for partnership in excluded_partnerships]
+    except (json.JSONDecodeError, TypeError):
+        excluded_partnership_sets = []
+    
+    # Get excluded players from query params
+    excluded_players_param = request.args.get('exclude_players', '[]')
+    try:
+        excluded_players = set(json.loads(excluded_players_param))
+    except (json.JSONDecodeError, TypeError):
+        excluded_players = set()
+    
+    # Get only active players (same as main recommendations)
+    all_active_players = get_active_players()
+    
+    # Filter out excluded players
+    if excluded_players:
+        all_active_players = [p for p in all_active_players if p not in excluded_players]
+    
+    if len(all_active_players) < 4:
+        return jsonify({'error': 'Not enough active players'}), 400
+    
+    # Get current session and its matches (for partnership history)
+    current_session = storage.get_current_session()
+    session_matches = storage.get_session_matches(current_session['session_id'])
+    
+    # Build partnership counter and total games (same logic as main)
+    partnership_counts = Counter()
+    total_games = Counter()
+    same_court_counts = Counter()
+    teammate_counts = defaultdict(Counter)
+    opponent_counts = defaultdict(Counter)
+    
+    # Track who played in the last game
+    last_game_players = set()
+    if session_matches:
+        last_match = session_matches[-1]
+        last_team1 = last_match.get('team1', [])
+        last_team2 = last_match.get('team2', [])
+        last_game_players = set(last_team1 + last_team2)
+    
+    for match in session_matches:
+        team1 = match.get('team1', [])
+        team2 = match.get('team2', [])
+        
+        if len(team1) == 2:
+            partnership_counts[frozenset(team1)] += 1
+            for player in team1:
+                total_games[player] += 1
+            teammate_counts[team1[0]][team1[1]] += 1
+            teammate_counts[team1[1]][team1[0]] += 1
+        
+        if len(team2) == 2:
+            partnership_counts[frozenset(team2)] += 1
+            for player in team2:
+                total_games[player] += 1
+            teammate_counts[team2[0]][team2[1]] += 1
+            teammate_counts[team2[1]][team2[0]] += 1
+        
+        if len(team1) == 2 and len(team2) == 2:
+            for p1 in team1:
+                for p2 in team2:
+                    opponent_counts[p1][p2] += 1
+                    opponent_counts[p2][p1] += 1
+        
+        all_players_in_match = team1 + team2
+        if len(all_players_in_match) == 4:
+            for i in range(len(all_players_in_match)):
+                for j in range(i + 1, len(all_players_in_match)):
+                    pair_key = frozenset([all_players_in_match[i], all_players_in_match[j]])
+                    same_court_counts[pair_key] += 1
+    
+    # Calculate win rates for all active players
+    player_win_rates = {}
+    for player in all_active_players:
+        stats = storage.get_player_stats(player)
+        total_matches = stats.get('total_matches', 0)
+        wins = stats.get('wins', 0)
+        win_rate = (wins / total_matches * 100) if total_matches > 0 else 50.0
+        player_win_rates[player] = win_rate
+    
+    def format_count(count):
+        if count == 0:
+            return "🆕"
+        elif count == 1:
+            return "①"
+        else:
+            return f"×{count}"
+    
+    def calculate_sitout_penalty(players_in_matchup):
+        playing_players = set(players_in_matchup)
+        sitting_players = set(all_active_players) - playing_players
+        
+        penalty = 0
+        for player in sitting_players:
+            if player not in last_game_players:
+                penalty += 1000
+        
+        penalty += len(sitting_players) * 10
+        return penalty
+    
+    def calculate_john_balance_penalty(players_in_matchup):
+        if 'John' not in players_in_matchup:
+            return 0
+        
+        john_teammates = teammate_counts.get('John', Counter())
+        john_opponents = opponent_counts.get('John', Counter())
+        
+        penalty = 0
+        for player in players_in_matchup:
+            if player == 'John':
+                continue
+            
+            is_teammate = False
+            for team_a, team_b in [((players_in_matchup[0], players_in_matchup[1]), (players_in_matchup[2], players_in_matchup[3])),
+                                   ((players_in_matchup[0], players_in_matchup[2]), (players_in_matchup[1], players_in_matchup[3])),
+                                   ((players_in_matchup[0], players_in_matchup[3]), (players_in_matchup[1], players_in_matchup[2]))]:
+                if 'John' in team_a and player in team_a:
+                    is_teammate = True
+                    break
+                if 'John' in team_b and player in team_b:
+                    is_teammate = True
+                    break
+            
+            current_teammate_count = john_teammates.get(player, 0)
+            current_opponent_count = john_opponents.get(player, 0)
+            
+            if is_teammate:
+                imbalance = current_teammate_count - current_opponent_count
+                if imbalance > 0:
+                    penalty += imbalance * 3
+            else:
+                imbalance = current_opponent_count - current_teammate_count
+                if imbalance > 0:
+                    penalty += imbalance * 3
+        
+        return penalty
+    
+    # Shuffle all active players for variety
+    shuffled_players = all_active_players[:]
+    random.shuffle(shuffled_players)
+    
+    # Try all 4-player combinations from shuffled list
+    all_matchups = []
+    for four_players in itertools.combinations(shuffled_players, 4):
+        p1, p2, p3, p4 = four_players
+        
+        partitions = [
+            ((p1, p2), (p3, p4)),
+            ((p1, p3), (p2, p4)),
+            ((p1, p4), (p2, p3))
+        ]
+        
+        for team_a, team_b in partitions:
+            # Skip if this partnership is already on another court
+            team_a_set = frozenset(team_a)
+            team_b_set = frozenset(team_b)
+            if team_a_set in excluded_partnership_sets or team_b_set in excluded_partnership_sets:
+                continue
+            
+            count_a = partnership_counts.get(frozenset(team_a), 0)
+            count_b = partnership_counts.get(frozenset(team_b), 0)
+            
+            games_a = total_games.get(team_a[0], 0) + total_games.get(team_a[1], 0)
+            games_b = total_games.get(team_b[0], 0) + total_games.get(team_b[1], 0)
+            games_balance = abs(games_a - games_b)
+            
+            team_a_wr = (player_win_rates.get(team_a[0], 50.0) + player_win_rates.get(team_a[1], 50.0)) / 2
+            team_b_wr = (player_win_rates.get(team_b[0], 50.0) + player_win_rates.get(team_b[1], 50.0)) / 2
+            win_rate_diff = abs(team_a_wr - team_b_wr)
+            
+            same_court_score = 0
+            all_four = [p1, p2, p3, p4]
+            for i in range(len(all_four)):
+                for j in range(i + 1, len(all_four)):
+                    pair_key = frozenset([all_four[i], all_four[j]])
+                    same_court_score += same_court_counts.get(pair_key, 0)
+            
+            sitout_penalty = calculate_sitout_penalty([p1, p2, p3, p4])
+            john_penalty = calculate_john_balance_penalty([p1, p2, p3, p4])
+            
+            score = (
+                sitout_penalty,
+                max(count_a, count_b),
+                games_balance,
+                john_penalty,
+                count_a + count_b,
+                win_rate_diff * 2,
+                same_court_score,
+                sorted([p1, p2, p3, p4])
+            )
+            
+            all_matchups.append({
+                'score': score,
+                'team_a': list(team_a),
+                'team_b': list(team_b),
+                'count_a': count_a,
+                'count_b': count_b
+            })
+    
+    if not all_matchups:
+        return '', 204
+    
+    # Sort and get best matchup
+    all_matchups.sort(key=lambda x: x['score'])
+    best_matchup = all_matchups[0]
+    
+    explanation = f"{best_matchup['team_a'][0]}/{best_matchup['team_a'][1]} {format_count(best_matchup['count_a'])} vs {best_matchup['team_b'][0]}/{best_matchup['team_b'][1]} {format_count(best_matchup['count_b'])}"
+    player_ids = best_matchup['team_a'] + best_matchup['team_b']
+    
+    return jsonify({
+        'team_a': best_matchup['team_a'],
+        'team_b': best_matchup['team_b'],
+        'explanation': explanation,
+        'player_ids': player_ids
+    })
+
+
 # ==================== Admin Endpoints ====================
 
 @app.route('/api/admin/recalculate-mmr', methods=['POST'])
+@login_required
+@admin_required
 def recalculate_mmr():
     """
     Admin endpoint to recalculate MMR ratings for all players.
-    Requires ADMIN_TOKEN environment variable for authorization.
+    Recalculates MMR from scratch based on all matches in the database.
     """
-    # Check authorization
-    admin_token = os.environ.get('ADMIN_TOKEN')
-    if admin_token:
-        provided_token = request.headers.get('X-Admin-Token')
-        if provided_token != admin_token:
-            return jsonify({'error': 'Unauthorized'}), 401
-    
     try:
-        from calculate_mmr import calculate_mmr_ratings, update_players_with_mmr
+        from mmr_database import recalculate_all_mmr
         
-        # Calculate new MMR ratings
-        player_ratings, history, players_data = calculate_mmr_ratings(
-            matches_file=MATCHES_FILE,
-            players_file=PLAYERS_FILE,
-            k_factor=24,
-            build_history=False
-        )
-        
-        # Update players with new ratings
-        update_players_with_mmr(
-            players_data,
-            player_ratings,
-            PLAYERS_FILE,
-            write=True
-        )
-        
-        # Reload session to pick up new MMR values
-        load_session()
+        # Recalculate MMR for all players from all matches
+        player_ratings = recalculate_all_mmr(k_factor=24)
         
         return jsonify({
             'message': 'MMR ratings recalculated successfully',
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': _now_pacific().isoformat(),
             'player_count': len(player_ratings),
             'ratings': {player: round(rating) for player, rating in player_ratings.items()}
         })

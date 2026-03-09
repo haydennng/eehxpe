@@ -37,20 +37,11 @@
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <button type="button" id="btn-clear-selected" class="btn btn-secondary btn-small" disabled title="Clear selected players">Clear</button>
-                    <button type="button" id="btn-cycle-recommendation" class="btn btn-secondary btn-small" disabled title="Pick recommended players or cycle through recommendations" style="padding: 0.5rem 0.75rem;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 2v6h-6"></path>
-                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
-                            <path d="M3 22v-6h6"></path>
-                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
-                        </svg>
-                    </button>
                     <button type="button" id="btn-lock-toggle" class="btn-lock-toggle" style="display: none;" title="Lock/unlock teams">
                         <span id="lock-icon">🔓</span>
                     </button>
                 </div>
             </div>
-            <div id="recommendation-explanation" class="text-muted" style="font-size: 0.875rem; margin-bottom: 0.5rem; min-height: 0.875rem;"></div>
             <div id="playerToggles" class="player-toggle-grid">
                 <div class="table-empty">Loading players...</div>
             </div>
@@ -58,88 +49,260 @@
         
         <!-- Teams & Bet Stacked Layout -->
         <div class="teams-bet-row" id="teamPreview">
-            <!-- Courts Selector Tabs -->
-            <nav class="courts-tabs" role="tablist" aria-label="Courts selector">
-                <button type="button" 
-                        class="courts-tab" 
-                        id="courts-tab-1" 
-                        data-courts="1" 
-                        role="tab" 
-                        aria-controls="courts-container" 
-                        aria-selected="false">
-                    1
-                </button>
-                <button type="button" 
-                        class="courts-tab is-active" 
-                        id="courts-tab-2" 
-                        data-courts="2" 
-                        role="tab" 
-                        aria-controls="courts-container" 
-                        aria-selected="true">
-                    2
-                </button>
-            </nav>
+            <!-- On Deck Recommendations Section -->
+            <div class="on-deck-section" id="onDeckSection">
+                <div class="on-deck-header">
+                    <h3>⏭️ On Deck </h3>
+                    <div class="on-deck-actions">
+                        <button type="button" id="btn-cycle-all-courts" class="btn btn-secondary btn-small" title="Cycle all court recommendations">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 2v6h-6"></path>
+                                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                                <path d="M3 22v-6h6"></path>
+                                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+                            </svg>
+                            Cycle All
+                        </button>
+                        <button type="button" id="btn-clear-all-courts" class="btn btn-secondary btn-small" title="Clear all court recommendations">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                            Clear All
+                        </button>
+                    </div>
+                    <button type="button" id="btn-on-deck-minimize" class="btn-on-deck-minimize" title="Minimize On Deck">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                </div>
+                <div id="onDeckContainer" class="on-deck-container">
+                    <!-- Recommendation cards rendered by JavaScript -->
+                </div>
+                <div class="on-deck-footer">
+                    <!-- Assign All button will be added here by JavaScript -->
+                </div>
+            </div>
             
             <!-- Courts Container -->
             <div id="courts-container">
-                <!-- Court 1 Row -->
-                <div class="court-row" id="court-1-row" data-court="1">
-                    <span class="court-number" id="court-1-number" aria-hidden="true" hidden>1</span>
-                    <div class="team team-a" data-team="a">
-                        <div class="team-names" id="court1-teamA"></div>
-                        <input type="number" class="score-input score-a" id="court1-score-a" min="0" placeholder="0" aria-label="Court 1 Team A Score">
+                <!-- Court 1 Section -->
+                <div class="court-section" id="court-1-section" data-court="1" data-state="empty">
+                    <div class="court-header">
+                        <span class="court-label">Court 1</span>
+                        <div class="court-header-actions">
+                            <button type="button" class="btn-court-clear" id="clearCourt1HeaderBtn" data-court="1" title="Clear Court 1" onclick="clearCourt(1)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                            <span class="court-status" id="court-1-status"></span>
+                        </div>
                     </div>
-                    <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
-                    <div class="team team-b" data-team="b">
-                        <input type="number" class="score-input score-b" id="court1-score-b" min="0" placeholder="0" aria-label="Court 1 Team B Score">
-                        <div class="team-names" id="court1-teamB"></div>
+                    
+                    <div class="court-row" id="court-1-row" data-court="1">
+                        <div class="team team-a" data-team="a">
+                            <div class="team-names" id="court1-teamA"></div>
+                            <input type="number" class="score-input score-a" id="court1-score-a" min="0" placeholder="0" aria-label="Court 1 Team A Score">
+                        </div>
+                        <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                        <div class="team team-b" data-team="b">
+                            <input type="number" class="score-input score-b" id="court1-score-b" min="0" placeholder="0" aria-label="Court 1 Team B Score">
+                            <div class="team-names" id="court1-teamB"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="court-bet-row">
+                        <div class="bet-button-group" id="court1-betButtons">
+                            <button type="button" class="btn-bet" data-court="1" data-value="0">$0</button>
+                            <button type="button" class="btn-bet" data-court="1" data-value="1">$1</button>
+                            <button type="button" class="btn-bet" data-court="1" data-value="2">$2</button>
+                            <button type="button" class="btn-bet" data-court="1" data-value="3">$3</button>
+                            <button type="button" class="btn-bet" data-court="1" data-value="4">$4</button>
+                            <button type="button" class="btn-bet" data-court="1" data-value="5">$5</button>
+                        </div>
+                    </div>
+                    
+                    <div class="court-actions">
+                        <button class="btn btn-primary record-court-btn" id="recordCourt1Btn" data-court="1" disabled>Record Court 1</button>
                     </div>
                 </div>
                 
-                <!-- Court 2 Row -->
-                <div class="court-row" id="court-2-row" data-court="2">
-                    <span class="court-number" id="court-2-number" aria-hidden="true">2</span>
-                    <div class="team team-a" data-team="a">
-                        <div class="team-names" id="court2-teamA"></div>
-                        <input type="number" class="score-input score-a" id="court2-score-a" min="0" placeholder="0" aria-label="Court 2 Team A Score">
+                <!-- Court 2 Section -->
+                <div class="court-section" id="court-2-section" data-court="2" data-state="empty" style="display: none;">
+                    <div class="court-header">
+                        <span class="court-label">Court 2</span>
+                        <div class="court-header-actions">
+                            <button type="button" class="btn-court-clear" id="clearCourt2HeaderBtn" data-court="2" title="Clear Court 2" onclick="clearCourt(2)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                            <span class="court-status" id="court-2-status"></span>
+                        </div>
                     </div>
-                    <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
-                    <div class="team team-b" data-team="b">
-                        <input type="number" class="score-input score-b" id="court2-score-b" min="0" placeholder="0" aria-label="Court 2 Team B Score">
-                        <div class="team-names" id="court2-teamB"></div>
+                    
+                    <div class="court-row" id="court-2-row" data-court="2">
+                        <div class="team team-a" data-team="a">
+                            <div class="team-names" id="court2-teamA"></div>
+                            <input type="number" class="score-input score-a" id="court2-score-a" min="0" placeholder="0" aria-label="Court 2 Team A Score">
+                        </div>
+                        <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                        <div class="team team-b" data-team="b">
+                            <input type="number" class="score-input score-b" id="court2-score-b" min="0" placeholder="0" aria-label="Court 2 Team B Score">
+                            <div class="team-names" id="court2-teamB"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="court-bet-row">
+                        <div class="bet-button-group" id="court2-betButtons">
+                            <button type="button" class="btn-bet" data-court="2" data-value="0">$0</button>
+                            <button type="button" class="btn-bet" data-court="2" data-value="1">$1</button>
+                            <button type="button" class="btn-bet" data-court="2" data-value="2">$2</button>
+                            <button type="button" class="btn-bet" data-court="2" data-value="3">$3</button>
+                            <button type="button" class="btn-bet" data-court="2" data-value="4">$4</button>
+                            <button type="button" class="btn-bet" data-court="2" data-value="5">$5</button>
+                        </div>
+                    </div>
+                    
+                    <div class="court-actions">
+                        <button class="btn btn-primary record-court-btn" id="recordCourt2Btn" data-court="2" disabled>Record Court 2</button>
                     </div>
                 </div>
                 
-                <!-- Court 3 Row -->
-                <div class="court-row court-row--hidden" id="court-3-row" data-court="3">
-                    <span class="court-number" id="court-3-number" aria-hidden="true">3</span>
-                    <div class="team team-a" data-team="a">
-                        <div class="team-names" id="court3-teamA"></div>
-                        <input type="number" class="score-input score-a" id="court3-score-a" min="0" placeholder="0" aria-label="Court 3 Team A Score">
+                <!-- Court 3 Section -->
+                <div class="court-section" id="court-3-section" data-court="3" data-state="empty" style="display: none;">
+                    <div class="court-header">
+                        <span class="court-label">Court 3</span>
+                        <div class="court-header-actions">
+                            <button type="button" class="btn-court-clear" id="clearCourt3HeaderBtn" data-court="3" title="Clear Court 3" onclick="clearCourt(3)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                            <span class="court-status" id="court-3-status"></span>
+                        </div>
                     </div>
-                    <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
-                    <div class="team team-b" data-team="b">
-                        <input type="number" class="score-input score-b" id="court3-score-b" min="0" placeholder="0" aria-label="Court 3 Team B Score">
-                        <div class="team-names" id="court3-teamB"></div>
+                    
+                    <div class="court-row" id="court-3-row" data-court="3">
+                        <div class="team team-a" data-team="a">
+                            <div class="team-names" id="court3-teamA"></div>
+                            <input type="number" class="score-input score-a" id="court3-score-a" min="0" placeholder="0" aria-label="Court 3 Team A Score">
+                        </div>
+                        <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                        <div class="team team-b" data-team="b">
+                            <input type="number" class="score-input score-b" id="court3-score-b" min="0" placeholder="0" aria-label="Court 3 Team B Score">
+                            <div class="team-names" id="court3-teamB"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="court-bet-row">
+                        <div class="bet-button-group" id="court3-betButtons">
+                            <button type="button" class="btn-bet" data-court="3" data-value="0">$0</button>
+                            <button type="button" class="btn-bet" data-court="3" data-value="1">$1</button>
+                            <button type="button" class="btn-bet" data-court="3" data-value="2">$2</button>
+                            <button type="button" class="btn-bet" data-court="3" data-value="3">$3</button>
+                            <button type="button" class="btn-bet" data-court="3" data-value="4">$4</button>
+                            <button type="button" class="btn-bet" data-court="3" data-value="5">$5</button>
+                        </div>
+                    </div>
+                    
+                    <div class="court-actions">
+                        <button class="btn btn-primary record-court-btn" id="recordCourt3Btn" data-court="3" disabled>Record Court 3</button>
                     </div>
                 </div>
-            </div>
-            
-            <!-- Bet Amount Selection (Below All Courts) -->
-            <div id="bet-row" class="bet-row">
-                <div id="betButtons" class="bet-button-group">
-                    <button type="button" class="btn-bet" data-value="0">$0</button>
-                    <button type="button" class="btn-bet" data-value="1">$1</button>
-                    <button type="button" class="btn-bet" data-value="2">$2</button>
-                    <button type="button" class="btn-bet" data-value="3">$3</button>
-                    <button type="button" class="btn-bet" data-value="4">$4</button>
-                    <button type="button" class="btn-bet" data-value="5">$5</button>
+                
+                <!-- Court 4 Section -->
+                <div class="court-section" id="court-4-section" data-court="4" data-state="empty" style="display: none;">
+                    <div class="court-header">
+                        <span class="court-label">Court 4</span>
+                        <div class="court-header-actions">
+                            <button type="button" class="btn-court-clear" id="clearCourt4HeaderBtn" data-court="4" title="Clear Court 4" onclick="clearCourt(4)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                            <span class="court-status" id="court-4-status"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="court-row" id="court-4-row" data-court="4">
+                        <div class="team team-a" data-team="a">
+                            <div class="team-names" id="court4-teamA"></div>
+                            <input type="number" class="score-input score-a" id="court4-score-a" min="0" placeholder="0" aria-label="Court 4 Team A Score">
+                        </div>
+                        <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                        <div class="team team-b" data-team="b">
+                            <input type="number" class="score-input score-b" id="court4-score-b" min="0" placeholder="0" aria-label="Court 4 Team B Score">
+                            <div class="team-names" id="court4-teamB"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="court-bet-row">
+                        <div class="bet-button-group" id="court4-betButtons">
+                            <button type="button" class="btn-bet" data-court="4" data-value="0">$0</button>
+                            <button type="button" class="btn-bet" data-court="4" data-value="1">$1</button>
+                            <button type="button" class="btn-bet" data-court="4" data-value="2">$2</button>
+                            <button type="button" class="btn-bet" data-court="4" data-value="3">$3</button>
+                            <button type="button" class="btn-bet" data-court="4" data-value="4">$4</button>
+                            <button type="button" class="btn-bet" data-court="4" data-value="5">$5</button>
+                        </div>
+                    </div>
+                    
+                    <div class="court-actions">
+                        <button class="btn btn-primary record-court-btn" id="recordCourt4Btn" data-court="4" disabled>Record Court 4</button>
+                    </div>
+                </div>
+                
+                <!-- Court 5 Section -->
+                <div class="court-section" id="court-5-section" data-court="5" data-state="empty" style="display: none;">
+                    <div class="court-header">
+                        <span class="court-label">Court 5</span>
+                        <div class="court-header-actions">
+                            <button type="button" class="btn-court-clear" id="clearCourt5HeaderBtn" data-court="5" title="Clear Court 5" onclick="clearCourt(5)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                            <span class="court-status" id="court-5-status"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="court-row" id="court-5-row" data-court="5">
+                        <div class="team team-a" data-team="a">
+                            <div class="team-names" id="court5-teamA"></div>
+                            <input type="number" class="score-input score-a" id="court5-score-a" min="0" placeholder="0" aria-label="Court 5 Team A Score">
+                        </div>
+                        <img class="vs-icon" src="/badminton/static/images/matchups.svg" alt="VS" aria-hidden="true">
+                        <div class="team team-b" data-team="b">
+                            <input type="number" class="score-input score-b" id="court5-score-b" min="0" placeholder="0" aria-label="Court 5 Team B Score">
+                            <div class="team-names" id="court5-teamB"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="court-bet-row">
+                        <div class="bet-button-group" id="court5-betButtons">
+                            <button type="button" class="btn-bet" data-court="5" data-value="0">$0</button>
+                            <button type="button" class="btn-bet" data-court="5" data-value="1">$1</button>
+                            <button type="button" class="btn-bet" data-court="5" data-value="2">$2</button>
+                            <button type="button" class="btn-bet" data-court="5" data-value="3">$3</button>
+                            <button type="button" class="btn-bet" data-court="5" data-value="4">$4</button>
+                            <button type="button" class="btn-bet" data-court="5" data-value="5">$5</button>
+                        </div>
+                    </div>
+                    
+                    <div class="court-actions">
+                        <button class="btn btn-primary record-court-btn" id="recordCourt5Btn" data-court="5" disabled>Record Court 5</button>
+                    </div>
                 </div>
             </div>
         </div>
-        
-        <!-- Submit Button -->
-        <button id="recordMatchBtn" class="btn btn-primary" disabled onclick="console.log('Button clicked via onclick')">Record Match</button>
         </div>
     </div>
     
@@ -176,12 +339,12 @@
                         </button>
                         <button type="button" 
                                 class="tab-item" 
-                                id="tab-queue" 
-                                data-tab-target="queue" 
+                                id="tab-logs" 
+                                data-tab-target="logs" 
                                 role="tab" 
-                                aria-controls="pane-queue" 
+                                aria-controls="pane-logs" 
                                 aria-selected="false">
-                            Queue
+                            Logs
                         </button>
                     </nav>
                 </div>
@@ -273,28 +436,15 @@
                             </div>
                         </div>
                     </section>
-                    
-                    <!-- Pane 4: Queue - Unplayed Pairings (hidden by default) -->
-                    <section id="pane-queue" 
+
+                    <!-- Pane 4: Logs (hidden by default) -->
+                    <section id="pane-logs" 
                              class="carousel-pane" 
                              role="tabpanel" 
-                             aria-labelledby="tab-queue" 
+                             aria-labelledby="tab-logs" 
                              hidden>
-                        <div class="queue-container-compact">
-                            <div class="queue-columns">
-                                <div class="queue-column">
-                                    <h4 class="queue-heading">New Teammates</h4>
-                                    <div id="queueTeammatesList" class="queue-list-compact">
-                                        <div style="color: var(--text-muted); font-size: 0.75rem;">Loading...</div>
-                                    </div>
-                                </div>
-                                <div class="queue-column">
-                                    <h4 class="queue-heading">New Opponents</h4>
-                                    <div id="queueOpponentsList" class="queue-list-compact">
-                                        <div style="color: var(--text-muted); font-size: 0.75rem;">Loading...</div>
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="logs-container" id="logsContainer">
+                            <div style="color: var(--text-muted); font-size: 0.875rem;">No logs yet</div>
                         </div>
                     </section>
 </div>

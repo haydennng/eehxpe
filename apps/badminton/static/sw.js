@@ -1,4 +1,4 @@
-const CACHE_NAME = 'badminton-cache-v6';
+const CACHE_NAME = 'badminton-cache-v7';
 const ASSETS = [
   '/badminton/',
   '/badminton/static/manifest.json',

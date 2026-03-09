@@ -107,7 +107,9 @@ function formatTime(isoString) {
 
 // Format currency
 function formatCurrency(amount) {
-    return `$${Number(amount).toFixed(2)}`;
+    const n = Number(amount);
+    if (n < 0) return `-$${Math.abs(n).toFixed(2)}`;
+    return `$${n.toFixed(2)}`;
 }
 
 // Format earnings with sign and color class
@@ -405,7 +407,7 @@ function computePlayerWinStats(matches) {
     return stats;
 }
 
-// Load quick recap of last 3 sessions (excluding today)
+// Load quick recap of last 5 sessions (excluding today)
 async function loadQuickRecap(sessions) {
     const tbody = qs('#quickRecapTableBody');
     
@@ -413,12 +415,12 @@ async function loadQuickRecap(sessions) {
         // Get today's date as YYYY-MM-DD
         const today = getTodayLocalDate();
         
-        // Filter out today's session and sort by date descending
-        const pastSessions = sessions.filter(s => s.date < today);
+        // Filter out today's session, sessions with no games, and sort by date descending
+        const pastSessions = sessions.filter(s => s.date < today && s.match_count > 0);
         pastSessions.sort((a, b) => b.date.localeCompare(a.date));
         
-        // Take the last 3 sessions
-        const last3Sessions = pastSessions.slice(0, 3);
+        // Take the last 5 sessions
+        const last3Sessions = pastSessions.slice(0, 5);
         
         if (last3Sessions.length === 0) {
             tbody.innerHTML = '<tr><td colspan="3" class="table-empty">No previous sessions found</td></tr>';
@@ -550,6 +552,7 @@ async function loadPlayers() {
             // Handle both old string format and new object format
             const playerName = typeof player === 'string' ? player : player.name;
             const mmr = (typeof player === 'object' && player.mmr) ? player.mmr : 1500;
+            const mmrRounded = Math.round(mmr).toFixed(0);  // Round to whole number, no decimals
             
             // Only show actions column if user is admin
             const actionsColumn = isAdmin() 
@@ -563,7 +566,7 @@ async function loadPlayers() {
             return `
                 <tr>
                     <td>${escapeHtml(playerName)}</td>
-                    <td style="text-align: center;">${mmr}</td>
+                    <td style="text-align: center;">${mmrRounded}</td>
                     ${actionsColumn}
                 </tr>
             `;
@@ -595,9 +598,33 @@ async function deletePlayer(name) {
 // Player selection and bet state
 let selectedPlayers = [];
 let selectedBet = null;
-let lastSelectedBet = null; // Remember the last bet for the next match
+let lastSelectedBet = 1; // Default to $1 bet
 let allPlayers = [];
 let currentSession = null;
+
+// Per-court state for individual recording (scalable to N courts)
+const MAX_COURTS = 5; // Support up to 5 courts (20 players)
+let selectedBets = {}; // Bet per court {1: null, 2: null, ...}
+let courtStates = {}; // Court states {1: 'empty', 2: 'empty', ...}
+let courtAssignments = {}; // Player assignments {1: [], 2: [], ...}
+
+// Initialize court state objects with default $1 bet
+for (let i = 1; i <= MAX_COURTS; i++) {
+    selectedBets[i] = 1; // Default to $1
+    courtStates[i] = 'empty';
+    courtAssignments[i] = [];
+}
+
+// On Deck queue state
+const MAX_QUEUE_SLOTS = 3;
+let queuedMatchups = []; // Array of {id, teamA: [p1, p2], teamB: [p3, p4]}
+let nextQueueId = 1; // Incrementing ID for queue items
+
+// Calculate number of courts needed based on active players
+function getRequiredCourts() {
+    // 1 court per 4 players: 4-7 players = 1 court, 8-11 = 2 courts, 12-15 = 3 courts, etc.
+    return Math.max(1, Math.floor(activePlayersCount / 4));
+}
 
 // Recommendation state (legacy single-court)
 let currentRecommendation = null;
@@ -609,6 +636,9 @@ let isDualCourt = false;
 let currentCourts = []; // [{court:1, team_a:[...], team_b:[...]}, ...]
 let currentRecommendedIds = []; // 4 or 8 player names in court order
 let activePlayersCount = 0; // Track active player count
+
+// Track previously suggested player sets for single-court cycling
+let previouslyExcludedPlayerSets = []; // Array of player name arrays that have been suggested
 
 // 2v2 mode state
 let mode2v2 = false; // false = Free For All, true = 2v2
@@ -622,10 +652,14 @@ const STORAGE_KEY_MODE = 'badminton_mode_2v2';
 const STORAGE_KEY_SELECTED = 'badminton_selected_players';
 const STORAGE_KEY_LOCKED = 'badminton_teams_locked';
 const STORAGE_KEY_LOCKED_TEAMS = 'badminton_locked_teams';
+const STORAGE_KEY_ON_DECK_MINIMIZED = 'badminton_on_deck_minimized';
 
 async function initMatchups() {
     try {
         console.log('Starting matchups page initialization...');
+        
+        // Load current user to get role (for admin features)
+        await loadCurrentUser();
         
         // Load current session first
         console.log('Loading current session...');
@@ -658,11 +692,16 @@ async function initMatchups() {
         await loadPlayerEarnings();
         console.log('Player earnings loaded');
         
-        console.log('Loading queue data (initial)...');
-        await loadQueueData();
-        console.log('Queue data loaded');
+        console.log('Loading session logs...');
+        await loadSessionLogs();
+        console.log('Session logs loaded');
         
-        // Set up bet button handlers
+        // Load recommendations automatically on init
+        console.log('Loading recommendations...');
+        await loadRecommendations();
+        console.log('Recommendations loaded');
+        
+        // Set up bet button handlers (per-court)
         const betButtons = qsa('.btn-bet');
         if (betButtons.length === 0) {
             console.error('No bet buttons found');
@@ -671,61 +710,79 @@ async function initMatchups() {
         
         betButtons.forEach(btn => {
             btn.addEventListener('click', () => {
-                qsa('.btn-bet').forEach(b => b.classList.remove('selected'));
+                const courtNum = parseInt(btn.dataset.court);
+                const betValue = parseInt(btn.dataset.value);
+                
+                // Only update buttons for this court
+                qsa(`.btn-bet[data-court="${courtNum}"]`).forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
-                selectedBet = parseInt(btn.dataset.value);
-                lastSelectedBet = selectedBet; // Remember this bet for next time
+                selectedBets[courtNum] = betValue;
+                lastSelectedBet = betValue; // Remember this bet for next time
                 btn.setAttribute('aria-pressed', 'true');
-                qsa('.btn-bet').forEach(b => {
+                qsa(`.btn-bet[data-court="${courtNum}"]`).forEach(b => {
                     if (b !== btn) b.setAttribute('aria-pressed', 'false');
                 });
-                validateForm();
+                validateCourt(courtNum);
             });
         });
         
-        // Restore last selected bet if available
+        // Restore last selected bet if available for all courts
         if (lastSelectedBet !== null) {
-            const lastBetButton = Array.from(betButtons).find(btn => parseInt(btn.dataset.value) === lastSelectedBet);
-            if (lastBetButton) {
-                lastBetButton.classList.add('selected');
-                lastBetButton.setAttribute('aria-pressed', 'true');
-                selectedBet = lastSelectedBet;
+            for (let i = 1; i <= MAX_COURTS; i++) {
+                const lastBetButton = Array.from(qsa(`.btn-bet[data-court="${i}"]`)).find(btn => parseInt(btn.dataset.value) === lastSelectedBet);
+                if (lastBetButton) {
+                    lastBetButton.classList.add('selected');
+                    lastBetButton.setAttribute('aria-pressed', 'true');
+                    selectedBets[i] = lastSelectedBet;
+                }
             }
         }
         
-        // Set up score input handlers for both courts
-        const court1ScoreA = qs('#court1-score-a');
-        const court1ScoreB = qs('#court1-score-b');
-        const court2ScoreA = qs('#court2-score-a');
-        const court2ScoreB = qs('#court2-score-b');
-        
-        if (court1ScoreA && court1ScoreB) {
-            court1ScoreA.addEventListener('input', validateForm);
-            court1ScoreB.addEventListener('input', validateForm);
-        } else {
-            console.warn('Court 1 score inputs not found - this may affect form validation');
-        }
-        
-        if (court2ScoreA && court2ScoreB) {
-            court2ScoreA.addEventListener('input', validateForm);
-            court2ScoreB.addEventListener('input', validateForm);
-        }
-        
-        // Set up record match button
-        const recordBtn = qs('#recordMatchBtn');
-        if (!recordBtn) {
-            console.error('Record match button not found');
-            return;
-        }
-        
-        recordBtn.addEventListener('click', async () => {
-            try {
-                await handleRecordMatch();
-            } catch (err) {
-                console.error('Button click error:', err);
-                toast('An error occurred', 'error');
+        // Set up score input handlers for all courts (per-court validation)
+        for (let i = 1; i <= MAX_COURTS; i++) {
+            const scoreA = qs(`#court${i}-score-a`);
+            const scoreB = qs(`#court${i}-score-b`);
+            
+            if (scoreA && scoreB) {
+                scoreA.addEventListener('input', () => validateCourt(i));
+                scoreB.addEventListener('input', () => validateCourt(i));
+            } else if (i === 1) {
+                console.warn(`Court ${i} score inputs not found - this may affect form validation`);
             }
-        });
+        }
+        
+        // Set up record and clear court buttons for all courts dynamically
+        for (let i = 1; i <= MAX_COURTS; i++) {
+            const recordBtn = qs(`#recordCourt${i}Btn`);
+            const clearBtn = qs(`#clearCourt${i}Btn`);
+            const cycleBtn = qs(`#cycleCourt${i}Btn`);
+            
+            if (recordBtn) {
+                recordBtn.addEventListener('click', async () => {
+                    try {
+                        await recordCourt(i);
+                    } catch (err) {
+                        console.error('Button click error:', err);
+                        toast('An error occurred', 'error');
+                    }
+                });
+            }
+            
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => clearCourt(i));
+            }
+            
+            if (cycleBtn) {
+                cycleBtn.addEventListener('click', async () => {
+                    try {
+                        await cycleSingleCourt(i);
+                    } catch (err) {
+                        console.error('Cycle button click error:', err);
+                        toast('An error occurred', 'error');
+                    }
+                });
+            }
+        }
         
         // Set up unified recommendation/cycle button handler
         const cycleBtn = qs('#btn-cycle-recommendation');
@@ -753,7 +810,7 @@ async function initMatchups() {
                     console.log('Dual-court mode - clearing and getting fresh recommendation');
                     selectedPlayers = [];
                     qsa('.player-name-btn').forEach(btn => {
-                        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2');
+                        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
                         btn.setAttribute('aria-pressed', 'false');
                     });
                     updatePlayerButtonStates();
@@ -790,6 +847,31 @@ async function initMatchups() {
         const btnLockToggle = qs('#btn-lock-toggle');
         if (btnLockToggle) {
             btnLockToggle.addEventListener('click', toggleTeamsLock);
+        }
+        
+        // Set up On Deck Cycle All button
+        const btnCycleAll = qs('#btn-cycle-all-courts');
+        if (btnCycleAll) {
+            btnCycleAll.addEventListener('click', cycleAllCourts);
+        }
+        
+        // Set up On Deck Clear All button
+        const btnClearAll = qs('#btn-clear-all-courts');
+        if (btnClearAll) {
+            btnClearAll.addEventListener('click', clearAllCourts);
+        }
+        
+        // Set up On Deck minimize toggle (restore saved state)
+        const onDeckSection = qs('#onDeckSection');
+        const btnMinimize = qs('#btn-on-deck-minimize');
+        if (onDeckSection && btnMinimize) {
+            if (localStorage.getItem(STORAGE_KEY_ON_DECK_MINIMIZED) === '1') {
+                onDeckSection.classList.add('minimized');
+            }
+            btnMinimize.addEventListener('click', () => {
+                const isMinimized = onDeckSection.classList.toggle('minimized');
+                localStorage.setItem(STORAGE_KEY_ON_DECK_MINIMIZED, isMinimized ? '1' : '0');
+            });
         }
         
         // Set up resize handler to re-render match history on breakpoint change
@@ -910,11 +992,32 @@ function renderPlayers() {
     const playersHtml = sortedPlayers.map(player => {
         const playerName = typeof player === 'string' ? player : player.name;
         const isActive = typeof player === 'string' ? true : (player.active !== undefined ? player.active : true);
-        const toggleIcon = isActive ? '✓' : 'X';
-        const containerClass = isActive ? 'player-item' : 'player-item is-inactive';
-        const disabledAttr = isActive ? '' : 'disabled';
-        const ariaLabel = isActive ? `Click to toggle, hold to remove` : `Click to activate`;
-        const ariaPressed = isActive ? 'false' : 'true';
+        const isNoBet = typeof player === 'object' && player.no_bet === true;
+        
+        // Determine icon and state
+        let toggleIcon, containerClass, disabledAttr, ariaLabel, ariaPressed;
+        if (isActive && isNoBet) {
+            // No-Bet state
+            toggleIcon = '$0';
+            containerClass = 'player-item is-no-bet';
+            disabledAttr = '';
+            ariaLabel = 'No-bet mode - Click to toggle, hold to remove';
+            ariaPressed = 'mixed';  // Indicate special state
+        } else if (isActive) {
+            // Active state
+            toggleIcon = '✓';
+            containerClass = 'player-item';
+            disabledAttr = '';
+            ariaLabel = 'Active - Click to toggle, hold to remove';
+            ariaPressed = 'false';
+        } else {
+            // Inactive state
+            toggleIcon = 'X';
+            containerClass = 'player-item is-inactive';
+            disabledAttr = 'disabled';
+            ariaLabel = 'Inactive - Click to activate';
+            ariaPressed = 'true';
+        }
         
         return `
             <div class="${containerClass}" data-player="${escapeHtml(playerName)}">
@@ -1050,18 +1153,46 @@ function togglePlayerSelection(btn) {
         // In 2v2 mode, can select up to 8 players (4 teams of 2)
         maxSelected = 8;
     } else {
-        // In Free For All mode, use existing logic
-        maxSelected = activePlayersCount >= 8 ? 8 : 4;
+        // In Free For All mode, allow up to MAX_COURTS * 4 players (up to 5 courts = 20 players)
+        // Don't restrict by activePlayersCount to allow manual selection
+        maxSelected = MAX_COURTS * 4;
     }
     
     if (isSelected) {
         // Deselect
         selectedPlayers = selectedPlayers.filter(p => p !== player);
-        btn.classList.remove('selected', 'court-1', 'court-2');
+        btn.classList.remove('selected', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
         btn.setAttribute('aria-pressed', 'false');
+        
+        // Remove player from court assignments using null placeholder to preserve position
+        for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
+            if (courtAssignments[courtNum] && courtAssignments[courtNum].includes(player)) {
+                // Replace with null to keep the slot open for a replacement
+                const playerIndex = courtAssignments[courtNum].indexOf(player);
+                courtAssignments[courtNum][playerIndex] = null;
+                
+                // If court is completely empty (all null), clear it fully
+                const hasPlayers = courtAssignments[courtNum].some(p => p !== null);
+                if (!hasPlayers) {
+                    courtAssignments[courtNum] = [];
+                    courtStates[courtNum] = 'empty';
+                    clearCourt(courtNum);
+                }
+                // Otherwise keep remaining players in position - don't clear the court
+            }
+        }
     } else {
         // Select (if less than max selected)
         if (selectedPlayers.length < maxSelected) {
+            // Check if any court has a vacancy (null slot) to fill
+            for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
+                if (courtAssignments[courtNum] && courtAssignments[courtNum].includes(null)) {
+                    const nullIndex = courtAssignments[courtNum].indexOf(null);
+                    courtAssignments[courtNum][nullIndex] = player;
+                    break;
+                }
+            }
+            
             selectedPlayers.push(player);
             btn.classList.add('selected');
             btn.setAttribute('aria-pressed', 'true');
@@ -1079,7 +1210,7 @@ function togglePlayerSelection(btn) {
     } else {
         // In 2v2 mode, remove all court watermarks
         qsa('.player-name-btn').forEach(btn => {
-            btn.classList.remove('court-1', 'court-2');
+            btn.classList.remove('court-1', 'court-2', 'court-3', 'court-4', 'court-5');
         });
     }
     
@@ -1136,7 +1267,7 @@ function switchMode(to2v2) {
     
     qsa('.player-name-btn').forEach(btn => {
         // Remove all selection and team classes
-        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'locked-inactive');
+        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5', 'locked-inactive');
         btn.setAttribute('aria-pressed', 'false');
         btn.removeAttribute('data-temp-disabled');
         
@@ -1421,7 +1552,7 @@ function cycle2v2LockedTeams() {
     
     // Update UI to reflect new matchup
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'locked-inactive', 'court-1', 'court-2');
+        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'locked-inactive', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
         btn.setAttribute('aria-pressed', 'false');
     });
     
@@ -1452,22 +1583,36 @@ function cycle2v2LockedTeams() {
     toast(`Matchup ${matchupNum}/${totalMatchups}`);
 }
 
-// Apply court watermarks to selected players based on their order
+// Apply court watermarks to selected players based on court assignments
 function applyCourtWatermarksToSelection() {
     // Remove all court classes first
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('court-1', 'court-2');
+        btn.classList.remove('court-1', 'court-2', 'court-3', 'court-4', 'court-5');
     });
     
-    // Apply court classes based on selection order
+    // First apply watermarks from actual court assignments (preserves positions with vacancies)
+    const assignedPlayers = new Set();
+    for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
+        if (courtAssignments[courtNum]) {
+            courtAssignments[courtNum].forEach(player => {
+                if (player === null) return;
+                assignedPlayers.add(player);
+                const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+                if (btn) {
+                    btn.classList.add(`court-${courtNum}`);
+                }
+            });
+        }
+    }
+    
+    // For selected players not yet in any court assignment, apply based on selection order
     selectedPlayers.forEach((player, index) => {
+        if (assignedPlayers.has(player)) return;
         const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
         if (btn) {
-            // Indices 0-3 = Court 1, 4-7 = Court 2
-            if (index < 4) {
-                btn.classList.add('court-1');
-            } else if (index < 8) {
-                btn.classList.add('court-2');
+            const courtNum = Math.floor(index / 4) + 1;
+            if (courtNum <= MAX_COURTS) {
+                btn.classList.add(`court-${courtNum}`);
             }
         }
     });
@@ -1688,7 +1833,8 @@ function closeDeactivatedDropdown() {
     if (backdrop) backdrop.remove();
 }
 
-// Toggle player active/inactive status (toggle button click)
+// Toggle player active/inactive/no-bet status (toggle button click)
+// Cycles through: Active (✓) → No-Bet ($0) → Inactive (X) → Active (✓)
 async function togglePlayerActive(playerName) {
     console.log('togglePlayerActive called for:', playerName);
     
@@ -1703,13 +1849,30 @@ async function togglePlayerActive(playerName) {
         return;
     }
     
-    // Toggle active state (optimistic update)
+    // Get current state
     const wasActive = typeof player === 'string' ? true : (player.active !== undefined ? player.active : true);
-    const newActive = !wasActive;
+    const wasNoBet = typeof player === 'object' && player.no_bet === true;
+    
+    // Cycle through states: Active → No-Bet → Inactive → Active
+    let newActive, newNoBet;
+    if (wasActive && !wasNoBet) {
+        // Active → No-Bet
+        newActive = true;
+        newNoBet = true;
+    } else if (wasActive && wasNoBet) {
+        // No-Bet → Inactive
+        newActive = false;
+        newNoBet = false;
+    } else {
+        // Inactive → Active
+        newActive = true;
+        newNoBet = false;
+    }
     
     // Update in-memory state
     if (typeof player === 'object') {
         player.active = newActive;
+        player.no_bet = newNoBet;
     }
     
     // If player was just deactivated and is currently selected, remove from selection
@@ -1735,13 +1898,49 @@ async function togglePlayerActive(playerName) {
         console.log('Less than 8 active players, clearing excess selections');
         selectedPlayers = [];
         qsa('.player-name-btn').forEach(btn => {
-            btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2');
+            btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
             btn.setAttribute('aria-pressed', 'false');
         });
     }
     
+    // Store current court assignments before re-rendering
+    const playerCourtAssignments = {};
+    selectedPlayers.forEach(pName => {
+        const btn = qs(`.player-name-btn[data-player="${pName}"]`);
+        if (btn) {
+            // Store all classes for this player
+            playerCourtAssignments[pName] = {
+                selected: btn.classList.contains('selected'),
+                teamA: btn.classList.contains('team-a'),
+                teamB: btn.classList.contains('team-b'),
+                court1: btn.classList.contains('court-1'),
+                court2: btn.classList.contains('court-2'),
+                court3: btn.classList.contains('court-3'),
+                court4: btn.classList.contains('court-4'),
+                court5: btn.classList.contains('court-5')
+            };
+        }
+    });
+    
     // Re-render players (this will move deactivated to bottom)
     renderPlayers();
+    
+    // Restore court assignments after re-rendering
+    Object.keys(playerCourtAssignments).forEach(pName => {
+        const btn = qs(`.player-name-btn[data-player="${pName}"]`);
+        if (btn && playerCourtAssignments[pName]) {
+            const classes = playerCourtAssignments[pName];
+            if (classes.selected) btn.classList.add('selected');
+            if (classes.teamA) btn.classList.add('team-a');
+            if (classes.teamB) btn.classList.add('team-b');
+            if (classes.court1) btn.classList.add('court-1');
+            if (classes.court2) btn.classList.add('court-2');
+            if (classes.court3) btn.classList.add('court-3');
+            if (classes.court4) btn.classList.add('court-4');
+            if (classes.court5) btn.classList.add('court-5');
+            if (classes.selected) btn.setAttribute('aria-pressed', 'true');
+        }
+    });
     
     // Update team preview and validation (this will hide Court 2 if needed)
     updateTeamColors();
@@ -1752,19 +1951,20 @@ async function togglePlayerActive(playerName) {
     try {
         await api(`./api/players/${encodeURIComponent(playerName)}/active`, {
             method: 'PATCH',
-            body: JSON.stringify({ active: newActive })
+            body: JSON.stringify({ active: newActive, no_bet: newNoBet })
         });
-        console.log('Player active status saved successfully');
+        console.log('Player status saved successfully:', { active: newActive, no_bet: newNoBet });
         
         // Reload recommendations since active players changed
         await loadRecommendations();
     } catch (error) {
-        console.error('Failed to save player active status:', error);
+        console.error('Failed to save player status:', error);
         toast('Failed to update player status', 'error');
         
         // Revert state on error
         if (typeof player === 'object') {
             player.active = wasActive;
+            player.no_bet = wasNoBet;
         }
         
         // Re-render to show correct state
@@ -1864,8 +2064,8 @@ function updatePlayerButtonStates() {
         // In 2v2 mode, can select up to 8 players (4 teams of 2)
         maxSelected = 8;
     } else {
-        // In Free For All mode, use existing logic
-        maxSelected = activePlayersCount >= 8 ? 8 : 4;
+        // In Free For All mode, allow up to MAX_COURTS * 4 players (up to 5 courts = 20 players)
+        maxSelected = MAX_COURTS * 4;
     }
     
     // Update disabled states for player buttons (name buttons)
@@ -1909,11 +2109,74 @@ function clearSelectedPlayers() {
     // Clear player selection
     selectedPlayers = [];
     
-    // Clear selection from name buttons
+    // Clear all court assignments and states
+    for (let i = 1; i <= MAX_COURTS; i++) {
+        courtAssignments[i] = [];
+        courtStates[i] = 'empty';
+        selectedBets[i] = 1; // Reset to default $1
+        
+        // Clear court UI elements
+        const teamAEl = qs(`#court${i}-teamA`);
+        const teamBEl = qs(`#court${i}-teamB`);
+        const scoreAEl = qs(`#court${i}-score-a`);
+        const scoreBEl = qs(`#court${i}-score-b`);
+        
+        if (teamAEl) {
+            teamAEl.innerHTML = '';
+            // Remove stats container if it exists
+            const teamAContainer = teamAEl.closest('.team');
+            const wrapperA = teamAContainer?.parentElement;
+            if (wrapperA && wrapperA.classList.contains('team-wrapper')) {
+                const statsA = wrapperA.querySelector('.team-stats-container');
+                if (statsA) statsA.remove();
+            }
+        }
+        if (teamBEl) {
+            teamBEl.innerHTML = '';
+            // Remove stats container if it exists
+            const teamBContainer = teamBEl.closest('.team');
+            const wrapperB = teamBContainer?.parentElement;
+            if (wrapperB && wrapperB.classList.contains('team-wrapper')) {
+                const statsB = wrapperB.querySelector('.team-stats-container');
+                if (statsB) statsB.remove();
+            }
+        }
+        if (scoreAEl) {
+            scoreAEl.value = '';
+            scoreAEl.disabled = false;
+        }
+        if (scoreBEl) {
+            scoreBEl.value = '';
+            scoreBEl.disabled = false;
+        }
+        
+        // Hide court sections
+        const courtSection = qs(`#court-${i}-section`);
+        if (courtSection) {
+            courtSection.style.display = 'none';
+        }
+        
+        // Reset bet buttons for this court to $1
+        qsa(`.btn-bet[data-court="${i}"]`).forEach(btn => {
+            const betValue = parseInt(btn.dataset.value);
+            btn.classList.toggle('selected', betValue === 1);
+            btn.setAttribute('aria-pressed', betValue === 1 ? 'true' : 'false');
+            btn.disabled = false;
+        });
+        
+        // Validate court (should disable record button)
+        validateCourt(i);
+    }
+    
+    // Clear selection from name buttons (pills)
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2');
+        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
         btn.setAttribute('aria-pressed', 'false');
-        // Don't modify disabled state here - renderPlayers handles that
+        // Remove temporary disabled state
+        if (btn.getAttribute('data-temp-disabled') === 'true') {
+            btn.disabled = false;
+            btn.removeAttribute('data-temp-disabled');
+        }
     });
     
     // Legacy support for old single-button format
@@ -1932,6 +2195,8 @@ function clearSelectedPlayers() {
     saveState();
     
     validateForm();
+    
+    toast('All courts and selections cleared');
 }
 
 function updateTeamColors() {
@@ -1977,12 +2242,30 @@ function updateTeamColors() {
             }
         });
     } else {
-        // Free For All mode: apply team colors based on selection order
-        // For each court: indices 0-1 (or 4-5) = Team A, indices 2-3 (or 6-7) = Team B
+        // Free For All mode: apply team colors based on court assignments first
+        const assignedFromCourts = new Set();
+        for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
+            if (courtAssignments[courtNum] && courtAssignments[courtNum].length === 4) {
+                courtAssignments[courtNum].forEach((player, idx) => {
+                    if (player === null) return;
+                    assignedFromCourts.add(player);
+                    const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+                    if (btn) {
+                        if (idx < 2) {
+                            btn.classList.add('team-a');
+                        } else {
+                            btn.classList.add('team-b');
+                        }
+                    }
+                });
+            }
+        }
+        
+        // For unassigned players, fall back to selection order
         selectedPlayers.forEach((player, index) => {
+            if (assignedFromCourts.has(player)) return;
             const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
             if (btn) {
-                // Determine team based on position within court
                 const positionInCourt = index % 4;
                 if (positionInCourt < 2) {
                     btn.classList.add('team-a');
@@ -2012,16 +2295,36 @@ function updateTeamColors() {
 
 async function loadRecommendations() {
     try {
-        const response = await api('./api/recommendations');
+        // Gather current court assignments to pass to API
+        const currentCourtsData = [];
+        for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
+            const assignment = courtAssignments[courtNum] || [];
+            if (assignment.length > 0) {
+                currentCourtsData.push({
+                    court: courtNum,
+                    players: assignment
+                });
+            }
+        }
         
-        // Check if dual-court mode
-        if (response.dual_court) {
-            // Dual-court mode: 8 players across 2 courts
-            isDualCourt = true;
+        // Build query string with current courts
+        const params = new URLSearchParams();
+        if (currentCourtsData.length > 0) {
+            params.append('current_courts', JSON.stringify(currentCourtsData));
+        }
+        
+        const url = `./api/recommendations${params.toString() ? '?' + params.toString() : ''}`;
+        const response = await api(url);
+        
+        // Check if multi-court mode (supports N courts dynamically)
+        if (response.multi_court || response.dual_court) {
+            // Multi-court mode: N players across N courts
+            const numCourts = response.num_courts || (response.dual_court ? 2 : 1);
+            isDualCourt = numCourts > 1;  // Keep for legacy compatibility
             currentCourts = response.matchups || [];
             currentRecommendedIds = response.player_ids || [];
             
-            console.log('Dual-court mode enabled:', currentCourts);
+            console.log(`Multi-court mode enabled: ${numCourts} courts`, currentCourts);
             
             // Build legacy currentRecommendation for compatibility
             if (currentCourts.length > 0) {
@@ -2055,28 +2358,236 @@ async function loadRecommendations() {
             // Store alternatives for cycling in single-court mode
             allRecommendations = response.recommendations || [];
             recommendationIndex = 0;
+            
+            // Reset exclusion tracking when loading fresh recommendations
+            previouslyExcludedPlayerSets = [];
         }
         
-        // Display the recommendation
+        // Display the recommendations in On Deck section
+        await displayOnDeckRecommendations();
+        
+        // Also display in player selection (legacy)
         displayRecommendation(recommendationIndex);
-        
-        // Enable the unified recommendation/cycle button
-        // But disable cycling in dual-court mode if there are exactly 8 active players
-        // (no other combinations possible)
-        const cycleBtn = qs('#btn-cycle-recommendation');
-        if (cycleBtn) {
-            // In dual-court mode with exactly 8 players, there's only one optimal arrangement
-            if (isDualCourt && activePlayersCount === 8) {
-                // Keep enabled for initial selection, but cycling won't help
-                cycleBtn.disabled = false;
-            } else {
-                cycleBtn.disabled = false;
-            }
-        }
     } catch (error) {
         console.log('Failed to load recommendations:', error);
         clearRecommendations();
     }
+}
+
+async function displayOnDeckRecommendations() {
+    const container = qs('#onDeckContainer');
+    if (!container) return;
+    
+    // Clear container
+    container.innerHTML = '';
+    
+    if (!currentCourts || currentCourts.length === 0) {
+        container.innerHTML = '<div class="on-deck-empty">No recommendations available</div>';
+        return;
+    }
+    
+    // Fetch current session matches to calculate partner/opponent stats
+    let partnerStats = {};
+    let opponentStats = {};
+    try {
+        const sessionData = await api('./api/sessions/current');
+        const sessionMatches = sessionData.matches || [];
+        
+        // Calculate partner and opponent counts from matches
+        sessionMatches.forEach(match => {
+            const team1 = match.team1 || [];
+            const team2 = match.team2 || [];
+            
+            // Count partnerships (teammates)
+            if (team1.length === 2) {
+                const key1 = `${team1[0]}|${team1[1]}`;
+                const key2 = `${team1[1]}|${team1[0]}`;
+                partnerStats[key1] = (partnerStats[key1] || 0) + 1;
+                partnerStats[key2] = (partnerStats[key2] || 0) + 1;
+            }
+            if (team2.length === 2) {
+                const key1 = `${team2[0]}|${team2[1]}`;
+                const key2 = `${team2[1]}|${team2[0]}`;
+                partnerStats[key1] = (partnerStats[key1] || 0) + 1;
+                partnerStats[key2] = (partnerStats[key2] || 0) + 1;
+            }
+            
+            // Count opponents
+            if (team1.length === 2 && team2.length === 2) {
+                for (let p1 of team1) {
+                    for (let p2 of team2) {
+                        const key = `${p1}|${p2}`;
+                        opponentStats[key] = (opponentStats[key] || 0) + 1;
+                    }
+                }
+                for (let p2 of team2) {
+                    for (let p1 of team1) {
+                        const key = `${p2}|${p1}`;
+                        opponentStats[key] = (opponentStats[key] || 0) + 1;
+                    }
+                }
+            }
+        });
+        
+        // Also count partnerships from currently assigned courts
+        for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
+            const players = courtAssignments[courtNum];
+            if (players && players.length === 4 && players.every(p => p !== null)) {
+                // Team A partnership
+                const teamA = players.slice(0, 2);
+                const keyA1 = `${teamA[0]}|${teamA[1]}`;
+                const keyA2 = `${teamA[1]}|${teamA[0]}`;
+                partnerStats[keyA1] = (partnerStats[keyA1] || 0) + 1;
+                partnerStats[keyA2] = (partnerStats[keyA2] || 0) + 1;
+                
+                // Team B partnership
+                const teamB = players.slice(2, 4);
+                const keyB1 = `${teamB[0]}|${teamB[1]}`;
+                const keyB2 = `${teamB[1]}|${teamB[0]}`;
+                partnerStats[keyB1] = (partnerStats[keyB1] || 0) + 1;
+                partnerStats[keyB2] = (partnerStats[keyB2] || 0) + 1;
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load match stats:', error);
+    }
+    
+    // Helper to format count with emojis
+    const formatCount = (count) => {
+        if (count === 0) return '🆕';
+        if (count === 1) return '①';
+        return `×${count}`;
+    };
+    
+    // Helper to build stats text for a matchup
+    const buildStatsText = (teamA, teamB) => {
+        const stats = [];
+        
+        // Partner stats for each team
+        if (teamA.length === 2) {
+            const partnerKey = `${teamA[0]}|${teamA[1]}`;
+            const partnerCount = partnerStats[partnerKey] || 0;
+            stats.push(`${teamA[0]}/${teamA[1]} ${formatCount(partnerCount)}`);
+        }
+        if (teamB.length === 2) {
+            const partnerKey = `${teamB[0]}|${teamB[1]}`;
+            const partnerCount = partnerStats[partnerKey] || 0;
+            stats.push(`${teamB[0]}/${teamB[1]} ${formatCount(partnerCount)}`);
+        }
+        
+        return stats.join(' | ');
+    };
+    
+    // Create a card for each court recommendation
+    currentCourts.forEach((court, idx) => {
+        const courtNum = court.court || (idx + 1);
+        const teamA = court.team_a || [];
+        const teamB = court.team_b || [];
+        const explanation = court.explanation || '';
+        
+        // Calculate win probabilities
+        const mmrA = calcTeamMMR(teamA);
+        const mmrB = calcTeamMMR(teamB);
+        const pA = expectedScore(mmrA, mmrB);
+        const pB = 1 - pA;
+        
+        // Calculate MMR changes for win/loss
+        const mmrAWin = calculateMMRChange(mmrA, mmrB, true);
+        const mmrALoss = calculateMMRChange(mmrA, mmrB, false);
+        const mmrBWin = calculateMMRChange(mmrB, mmrA, true);
+        const mmrBLoss = calculateMMRChange(mmrB, mmrA, false);
+        
+        // Build stats text
+        const statsText = buildStatsText(teamA, teamB);
+        
+        const card = document.createElement('div');
+        card.className = 'on-deck-card';
+        card.dataset.court = courtNum;
+        
+        card.innerHTML = `
+            <div class="on-deck-card-header">
+                <span class="on-deck-court-label">Court ${courtNum}</span>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" class="btn-on-deck-assign btn btn-secondary btn-small" data-court="${courtNum}" title="Assign to Court ${courtNum}">
+                        Assign
+                    </button>
+                    <button type="button" class="btn-on-deck-cycle" data-court="${courtNum}" title="Cycle Court ${courtNum} recommendation">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 2v6h-6"></path>
+                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                            <path d="M3 22v-6h6"></path>
+                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="on-deck-matchup">
+                <div class="on-deck-team-wrapper">
+                    <div class="on-deck-stats">
+                        <span class="on-deck-win-prob">${formatPct(pA)}</span>
+                        <span class="mmr-change mmr-win">${formatMMRChange(mmrAWin)}</span>
+                        <span class="mmr-change mmr-loss">${formatMMRChange(mmrALoss)}</span>
+                    </div>
+                    <div class="on-deck-team on-deck-team-a">
+                        ${teamA.map(p => escapeHtml(p)).join(' & ')}
+                    </div>
+                </div>
+                <span class="on-deck-vs">vs</span>
+                <div class="on-deck-team-wrapper">
+                    <div class="on-deck-stats">
+                        <span class="on-deck-win-prob">${formatPct(pB)}</span>
+                        <span class="mmr-change mmr-win">${formatMMRChange(mmrBWin)}</span>
+                        <span class="mmr-change mmr-loss">${formatMMRChange(mmrBLoss)}</span>
+                    </div>
+                    <div class="on-deck-team on-deck-team-b">
+                        ${teamB.map(p => escapeHtml(p)).join(' & ')}
+                    </div>
+                </div>
+            </div>
+            <div class="on-deck-court-info">
+                ${escapeHtml(statsText)}
+            </div>
+        `;
+        
+        container.appendChild(card);
+    });
+    
+    // Add Assign All button to footer if we have recommendations
+    const onDeckFooter = qs('.on-deck-footer');
+    if (onDeckFooter && currentCourts.length > 0) {
+        // Remove existing Assign All button if it exists
+        const existing = qs('#btn-assign-all-courts');
+        if (existing) existing.remove();
+        
+        // Add Assign All button to footer (bottom right)
+        const assignAllBtn = document.createElement('button');
+        assignAllBtn.type = 'button';
+        assignAllBtn.id = 'btn-assign-all-courts';
+        assignAllBtn.className = 'btn btn-primary';
+        assignAllBtn.title = 'Assign all recommendations to courts';
+        assignAllBtn.textContent = 'Assign All';
+        assignAllBtn.addEventListener('click', assignAllCourts);
+        onDeckFooter.appendChild(assignAllBtn);
+    } else if (onDeckFooter) {
+        // Clear footer if no recommendations
+        onDeckFooter.innerHTML = '';
+    }
+    
+    // Add event handlers for individual cycle buttons
+    qsa('.btn-on-deck-cycle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const courtNum = parseInt(btn.dataset.court);
+            cycleSingleCourtRecommendation(courtNum);
+        });
+    });
+    
+    // Add event handlers for individual assign buttons
+    qsa('.btn-on-deck-assign').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const courtNum = parseInt(btn.dataset.court);
+            assignCourtRecommendation(courtNum);
+        });
+    });
 }
 
 function displayRecommendation(index) {
@@ -2095,48 +2606,60 @@ function displayRecommendation(index) {
     }
     
     // Remove existing recommendation classes from name buttons
+    // BUT preserve court classes for players that are actually assigned to courts
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('recommend-team-a', 'recommend-team-b', 'court-1', 'court-2');
+        const playerName = btn.dataset.player;
+        let isAssigned = false;
+        
+        // Check if this player is assigned to any court
+        for (let i = 1; i <= MAX_COURTS; i++) {
+            if (courtAssignments[i] && courtAssignments[i].includes(playerName)) {
+                isAssigned = true;
+                break;
+            }
+        }
+        
+        // Only remove classes if player is not assigned to a court
+        if (!isAssigned) {
+            btn.classList.remove('recommend-team-a', 'recommend-team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
+        }
     });
     
     // Add recommendation highlights based on current mode
-    if (isDualCourt && currentCourts.length === 2) {
-        // Dual-court: highlight 8 players with court indicators
-        const court1 = currentCourts[0];
-        const court2 = currentCourts[1];
+    // NOTE: Don't add court classes here - only add them when actually assigned
+    if (currentCourts && currentCourts.length > 1) {
+        // Multi-court: highlight N*4 players (without court colors)
+        let explanations = [];
         
-        // Court 1 players
-        court1.team_a.forEach(player => {
-            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-a', 'court-1');
-            }
-        });
-        court1.team_b.forEach(player => {
-            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-b', 'court-1');
-            }
-        });
-        
-        // Court 2 players
-        court2.team_a.forEach(player => {
-            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-a', 'court-2');
-            }
-        });
-        court2.team_b.forEach(player => {
-            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-b', 'court-2');
-            }
+        currentCourts.forEach((court, idx) => {
+            const courtNum = court.court || (idx + 1);
+            
+            // Team A players for this court
+            court.team_a.forEach(player => {
+                const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+                if (btn && !btn.classList.contains('selected')) {
+                    // Only add recommend class if player is not already assigned to a court
+                    btn.classList.add('recommend-team-a');
+                }
+            });
+            
+            // Team B players for this court
+            court.team_b.forEach(player => {
+                const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
+                if (btn && !btn.classList.contains('selected')) {
+                    // Only add recommend class if player is not already assigned to a court
+                    btn.classList.add('recommend-team-b');
+                }
+            });
+            
+            // Collect explanation for this court
+            explanations.push(`Court ${courtNum}: ${court.explanation}`);
         });
         
-        // Update explanation with both courts
+        // Update explanation with all courts
         const explanationEl = qs('#recommendation-explanation');
         if (explanationEl) {
-            explanationEl.innerHTML = `Court 1: ${court1.explanation}<br>Court 2: ${court2.explanation}`;
+            explanationEl.innerHTML = explanations.join('<br>');
         }
     } else if (currentRecommendation) {
         // Single-court: highlight 4 players
@@ -2193,7 +2716,7 @@ function clearRecommendations() {
     
     // Remove all recommendation highlights and court classes from name buttons
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('recommend-team-a', 'recommend-team-b', 'court-1', 'court-2');
+        btn.classList.remove('recommend-team-a', 'recommend-team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
     });
     
     // Legacy support for old single-button format
@@ -2207,27 +2730,263 @@ function clearRecommendations() {
         explanationEl.textContent = '';
     }
     
-    // Disable unified recommendation/cycle button
-    const cycleBtn = qs('#btn-cycle-recommendation');
-    if (cycleBtn) {
-        cycleBtn.disabled = true;
+    // Clear On Deck display
+    const onDeckContainer = qs('#onDeckContainer');
+    if (onDeckContainer) {
+        onDeckContainer.innerHTML = '';
     }
+}
+
+// --- On Deck Assign All ---
+function assignAllCourts() {
+    if (!currentCourts || currentCourts.length === 0) return;
+    
+    // Assign each recommendation to its respective court
+    currentCourts.forEach((court, idx) => {
+        const courtNum = court.court || (idx + 1);
+        const teamA = court.team_a || [];
+        const teamB = court.team_b || [];
+        
+        // Store in courtAssignments
+        courtAssignments[courtNum] = [...teamA, ...teamB];
+        courtStates[courtNum] = 'assigned';
+    });
+    
+    // Update player selection to reflect court assignments
+    updatePlayerSelectionFromCourts();
+    
+    toast('All recommendations assigned to courts');
+}
+
+// --- On Deck Assign Single Court ---
+function assignCourtRecommendation(courtNum) {
+    const court = currentCourts.find(c => (c.court || 0) === courtNum);
+    if (!court) return;
+    
+    const teamA = court.team_a || [];
+    const teamB = court.team_b || [];
+    
+    // Store in courtAssignments
+    courtAssignments[courtNum] = [...teamA, ...teamB];
+    courtStates[courtNum] = 'assigned';
+    
+    // Update player selection to reflect court assignments
+    updatePlayerSelectionFromCourts();
+    
+    toast(`Court ${courtNum} assigned`);
+}
+
+// --- Update Player Selection from Courts ---
+function updatePlayerSelectionFromCourts() {
+    // First, clear all court classes from all player buttons
+    qsa('.player-name-btn').forEach(btn => {
+        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
+        btn.setAttribute('aria-pressed', 'false');
+    });
+    
+    // Rebuild selectedPlayers from courtAssignments
+    selectedPlayers = [];
+    
+    // Go through courts in order and update player buttons
+    for (let courtNum = 1; courtNum <= 5; courtNum++) {
+        const players = courtAssignments[courtNum];
+        if (players && players.length === 4) {
+            selectedPlayers.push(...players);
+            
+            // Update each player's button with court class and team designation
+            players.forEach((playerName, idx) => {
+                const btn = qs(`.player-name-btn[data-player="${playerName}"]`);
+                if (btn) {
+                    // First 2 players are team-a, last 2 are team-b
+                    const teamClass = idx < 2 ? 'team-a' : 'team-b';
+                    btn.classList.add('selected', `court-${courtNum}`, teamClass);
+                    btn.setAttribute('aria-pressed', 'true');
+                }
+            });
+            
+            // Update court display for this court
+            const teamAEl = qs(`#court${courtNum}-teamA`);
+            const teamBEl = qs(`#court${courtNum}-teamB`);
+            if (teamAEl && teamBEl) {
+                const teamA = players.slice(0, 2);
+                const teamB = players.slice(2, 4);
+                const mmrA = calcTeamMMR(teamA);
+                const mmrB = calcTeamMMR(teamB);
+                const pA = expectedScore(mmrA, mmrB);
+                const pB = 1 - pA;
+                
+                // Calculate MMR changes for win/loss
+                const mmrAWin = calculateMMRChange(mmrA, mmrB, true);
+                const mmrALoss = calculateMMRChange(mmrA, mmrB, false);
+                const mmrBWin = calculateMMRChange(mmrB, mmrA, true);
+                const mmrBLoss = calculateMMRChange(mmrB, mmrA, false);
+                
+                renderTeamNamesWithProb(teamAEl, teamA, pA, mmrAWin, mmrALoss);
+                renderTeamNamesWithProb(teamBEl, teamB, pB, mmrBWin, mmrBLoss);
+            }
+            
+            // Show court section
+            const courtSection = qs(`#court-${courtNum}-section`);
+            if (courtSection) {
+                courtSection.style.display = 'block';
+            }
+            
+            // Validate the court
+            validateCourt(courtNum);
+        }
+    }
+    
+    // Update player button states (but don't call updateTeamPreview to avoid conflicts)
+    updatePlayerButtonStates();
+}
+
+// Cycle all court recommendations at once
+async function cycleAllCourts() {
+    try {
+        console.log('Cycling all court recommendations');
+        console.log('currentCourts.length:', currentCourts.length);
+        console.log('currentCourts:', currentCourts);
+        console.log('allRecommendations:', allRecommendations);
+        console.log('recommendationIndex:', recommendationIndex);
+        
+        // For single court mode, cycle through the allRecommendations array
+        if (currentCourts.length === 1) {
+            // Check if we have alternatives to cycle through
+            if (!allRecommendations || allRecommendations.length <= 1) {
+                console.log('No alternative recommendations available');
+                toast('No other recommendations available', 'info');
+                return;
+            }
+            
+            // Move to next recommendation in the array
+            recommendationIndex = (recommendationIndex + 1) % allRecommendations.length;
+            console.log('New recommendationIndex:', recommendationIndex);
+            
+            // Get the next recommendation
+            const nextRecommendation = allRecommendations[recommendationIndex];
+            console.log('Next recommendation:', nextRecommendation);
+            
+            // Update state with the new recommendation
+            currentCourts = [{
+                court: 1,
+                team_a: nextRecommendation.team_a,
+                team_b: nextRecommendation.team_b,
+                explanation: nextRecommendation.explanation
+            }];
+            
+            currentRecommendation = {
+                teamA: nextRecommendation.team_a,
+                teamB: nextRecommendation.team_b,
+                explanation: nextRecommendation.explanation
+            };
+            
+            currentRecommendedIds = [...nextRecommendation.team_a, ...nextRecommendation.team_b];
+            
+            // Display the new recommendation
+            await displayOnDeckRecommendations();
+            displayRecommendation(recommendationIndex);
+            
+            // Show which recommendation we're on
+            const total = allRecommendations.length;
+            const current = recommendationIndex + 1;
+            toast(`Showing recommendation ${current} of ${total}`);
+        } else {
+            // Multi-court: reload all recommendations from server
+            await loadRecommendations();
+            toast('Recommendations refreshed');
+        }
+    } catch (error) {
+        console.error('Failed to cycle all courts:', error);
+        toast('Failed to refresh recommendations', 'error');
+    }
+}
+
+// Cycle a single court recommendation - only swap partners within same 4 players
+async function cycleSingleCourtRecommendation(courtNum) {
+    console.log(`Cycling recommendation for court ${courtNum}`);
+    
+    // Find the court in currentCourts (use == for loose comparison in case of string/number mismatch)
+    const courtIndex = currentCourts.findIndex(c => c.court == courtNum);
+    if (courtIndex < 0) {
+        console.error(`Court ${courtNum} not found in currentCourts`);
+        return;
+    }
+    
+    const court = currentCourts[courtIndex];
+    const teamA = [...court.team_a];
+    const teamB = [...court.team_b];
+    
+    // Get all 4 players and SORT for stable combination generation.
+    // Without sorting, the player indices shift after each cycle, causing
+    // the "current" to always land on combo 0 and skip the 3rd option.
+    const allPlayers = [...teamA, ...teamB].sort();
+    
+    // Generate all possible partner combinations (3 total for 4 players)
+    const combinations = [
+        { team_a: [allPlayers[0], allPlayers[1]], team_b: [allPlayers[2], allPlayers[3]] },
+        { team_a: [allPlayers[0], allPlayers[2]], team_b: [allPlayers[1], allPlayers[3]] },
+        { team_a: [allPlayers[0], allPlayers[3]], team_b: [allPlayers[1], allPlayers[2]] }
+    ];
+    
+    // Find current combination index (check both team orientations since
+    // sorted combos may have team_a/team_b swapped relative to the original)
+    let currentIndex = -1;
+    for (let i = 0; i < combinations.length; i++) {
+        const combo = combinations[i];
+        const matchNormal = arraysEqual(combo.team_a, teamA) && arraysEqual(combo.team_b, teamB);
+        const matchSwapped = arraysEqual(combo.team_a, teamB) && arraysEqual(combo.team_b, teamA);
+        if (matchNormal || matchSwapped) {
+            currentIndex = i;
+            break;
+        }
+    }
+    
+    // Move to next combination
+    const nextIndex = (currentIndex + 1) % combinations.length;
+    const nextCombo = combinations[nextIndex];
+    
+    // Update the court with new combination
+    currentCourts[courtIndex] = {
+        court: courtNum,
+        team_a: nextCombo.team_a,
+        team_b: nextCombo.team_b,
+        explanation: `Cycled partners for Court ${courtNum}`
+    };
+    
+    // Re-display On Deck recommendations (await since it fetches stats)
+    await displayOnDeckRecommendations();
+    toast(`Court ${courtNum} partners swapped`);
+}
+
+// Helper function to compare arrays
+function arraysEqual(arr1, arr2) {
+    if (arr1.length !== arr2.length) return false;
+    const sorted1 = [...arr1].sort();
+    const sorted2 = [...arr2].sort();
+    return sorted1.every((val, idx) => val === sorted2[idx]);
+}
+
+// Clear all On Deck recommendations
+function clearAllCourts() {
+    console.log('Clearing all On Deck recommendations');
+    clearRecommendations();
+    toast('Recommendations cleared');
 }
 
 async function cycleRecommendation() {
     console.log('cycleRecommendation called. isDualCourt:', isDualCourt);
     
     if (isDualCourt) {
-        // Dual-court mode: fetch new dual-court recommendation (different team arrangement)
+        // Multi-court mode: fetch new recommendation (different team arrangement)
         try {
-            // Don't exclude players in dual-court mode, just fetch a fresh recommendation
-            // The backend will generate a different team arrangement
-            console.log('Fetching new dual-court recommendations');
+            // Don't exclude players in multi-court mode, just fetch a fresh recommendation
+            // The backend will shuffle and generate a different arrangement
+            console.log('Fetching new multi-court recommendations');
             const response = await api('./api/recommendations');
             console.log('Got response:', response);
             
             // Update state with new recommendations
-            if (response.dual_court) {
+            if (response.multi_court || response.dual_court) {
                 currentCourts = response.matchups || [];
                 currentRecommendedIds = response.player_ids || [];
                 console.log('Updated currentCourts:', currentCourts);
@@ -2243,7 +3002,7 @@ async function cycleRecommendation() {
                 
                 displayRecommendation(0);
             } else {
-                // Fallback: backend couldn't provide dual-court (not enough unique players)
+                // Fallback: backend couldn't provide multi-court (not enough unique players)
                 isDualCourt = false;
                 if (response.team_a && response.team_b) {
                     currentCourts = [{
@@ -2260,7 +3019,7 @@ async function cycleRecommendation() {
                     currentRecommendedIds = response.player_ids || [];
                 }
                 displayRecommendation(0);
-                toast('Not enough unique players for dual-court. Showing single court.', 'info');
+                toast('Not enough players for multi-court. Showing single court.', 'info');
             }
         } catch (error) {
             console.error('Failed to cycle recommendations:', error);
@@ -2306,7 +3065,7 @@ function setRecommendedMatchup() {
     // Clear from name buttons and remove court classes
     // Also remove any temp-disabled attributes so all buttons are available for selection
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2');
+        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
         btn.setAttribute('aria-pressed', 'false');
         // Remove temporary disabled state
         if (btn.getAttribute('data-temp-disabled') === 'true') {
@@ -2322,13 +3081,13 @@ function setRecommendedMatchup() {
         btn.setAttribute('aria-pressed', 'false');
     });
     
-    if (isDualCourt && currentCourts.length === 2) {
-        // Dual-court mode: select all 8 players based on actual court assignments
-        console.log('Selecting 8 players for dual-court');
+    if (isDualCourt && currentCourts.length >= 2) {
+        // Multi-court mode: select all N*4 players based on actual court assignments
+        console.log(`Selecting ${currentCourts.length * 4} players for ${currentCourts.length} courts`);
         
         // Iterate through each court and assign players based on backend matchup
         currentCourts.forEach((court, courtIdx) => {
-            const courtNum = court.court;
+            const courtNum = court.court || (courtIdx + 1);
             const courtClass = `court-${courtNum}`;
             
             // Add Team A players for this court
@@ -2434,107 +3193,239 @@ function expectedScore(ratingA, ratingB) {
     return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
 }
 
+// Calculate MMR change for a team
+// K_FACTOR is 24 based on the backend mmr_calculator.py
+const K_FACTOR = 24;
+
+function calculateMMRChange(teamMMR, opponentMMR, isWin) {
+    const expectedWin = expectedScore(teamMMR, opponentMMR);
+    const actualScore = isWin ? 1.0 : 0.0;
+    return K_FACTOR * (actualScore - expectedWin);
+}
+
 // Format probability as percentage string (e.g., "78%")
 function formatPct(prob) {
     const p = Math.round(prob * 100);
     return `${p}%`;
 }
 
-// Render team names with win probability percentage
-function renderTeamNamesWithProb(containerEl, players, probOrNull) {
+// Format MMR change with +/- sign (e.g., "+12" or "-8")
+function formatMMRChange(change) {
+    const rounded = Math.round(change);
+    if (rounded > 0) {
+        return `+${rounded}`;
+    } else if (rounded < 0) {
+        return `${rounded}`;
+    }
+    return '0';
+}
+
+// Render team names with win probability percentage and MMR change
+function renderTeamNamesWithProb(containerEl, players, probOrNull, mmrWinOrNull = null, mmrLossOrNull = null) {
     // Check if mobile (viewport width <= 768px)
     const isMobile = window.innerWidth <= 768;
     
-    // Format team names (existing logic)
+    // Get the team container
+    const teamContainer = containerEl.closest('.team');
+    if (!teamContainer) return; // Safety check
+    
+    // Check if we already have a wrapper
+    let wrapper = teamContainer.parentElement;
+    if (wrapper && wrapper.classList.contains('team-wrapper')) {
+        // Already wrapped, use existing wrapper
+    } else {
+        // Need to create wrapper
+        wrapper = document.createElement('div');
+        wrapper.className = 'team-wrapper';
+        
+        // Get parent (should be .court-row)
+        const courtRow = teamContainer.parentElement;
+        
+        // Insert wrapper before team
+        courtRow.insertBefore(wrapper, teamContainer);
+        
+        // Move team into wrapper
+        wrapper.appendChild(teamContainer);
+    }
+    
+    // Get or create stats container
+    let statsContainer = wrapper.querySelector('.team-stats-container');
+    if (!statsContainer) {
+        statsContainer = document.createElement('div');
+        statsContainer.className = 'team-stats-container';
+        wrapper.insertBefore(statsContainer, teamContainer);
+    }
+    
+    // Clear stats container
+    statsContainer.innerHTML = '';
+    
+    // Add stats row (win% and MMR) if available
+    if (probOrNull != null) {
+        const winProb = document.createElement('span');
+        winProb.className = 'win-prob';
+        winProb.textContent = formatPct(probOrNull);
+        statsContainer.appendChild(winProb);
+        
+        // Add MMR change if provided
+        if (mmrWinOrNull != null && mmrLossOrNull != null) {
+            const mmrWinSpan = document.createElement('span');
+            mmrWinSpan.className = 'mmr-change mmr-win';
+            mmrWinSpan.textContent = ' ' + formatMMRChange(mmrWinOrNull);
+            statsContainer.appendChild(mmrWinSpan);
+            
+            const mmrLossSpan = document.createElement('span');
+            mmrLossSpan.className = 'mmr-change mmr-loss';
+            mmrLossSpan.textContent = ' ' + formatMMRChange(mmrLossOrNull);
+            statsContainer.appendChild(mmrLossSpan);
+        }
+    }
+    
+    // Clear and update team names container (existing logic)
+    containerEl.innerHTML = '';
+    
+    // Format team names
     if (isMobile) {
         // Mobile: stack names vertically using div elements
         containerEl.innerHTML = players.map(name => `<div>${escapeHtml(name)}</div>`).join('');
     } else {
         // Desktop: join with &
-        containerEl.innerHTML = escapeHtml(players.join(' & '));
-    }
-    
-    // Append win probability if available
-    if (probOrNull != null) {
-        const span = document.createElement('span');
-        span.className = 'win-prob';
-        span.textContent = ' ' + formatPct(probOrNull);
-        containerEl.appendChild(span);
+        containerEl.textContent = players.join(' & ');
     }
 }
 
 function updateTeamPreview() {
-    // Update team names based on selected players and mode
-    const court1TeamA = qs('#court1-teamA');
-    const court1TeamB = qs('#court1-teamB');
-    const court2Row = qs('#court-2-row');
-    const court2TeamA = qs('#court2-teamA');
-    const court2TeamB = qs('#court2-teamB');
-    
-    if (!court1TeamA || !court1TeamB) {
-        console.error('Court team containers not found');
-        return;
-    }
+    // Calculate how many courts are needed
+    const requiredCourts = getRequiredCourts();
     
     // Helper to render a court's teams with win probabilities
-    const assignAndRenderCourt = (offset, teamAEl, teamBEl) => {
-        const teamA = selectedPlayers.slice(offset, offset + 2).filter(Boolean);
-        const teamB = selectedPlayers.slice(offset + 2, offset + 4).filter(Boolean);
+    const assignAndRenderCourt = (courtNum, offset, teamAEl, teamBEl) => {
+        // Use existing court assignment if it exists, otherwise use selectedPlayers slice
+        let teamA, teamB;
         
-        if (teamA.length > 0 && teamB.length > 0) {
-            // Both teams have players - calculate win probabilities
+        if (courtAssignments[courtNum] && courtAssignments[courtNum].length === 4) {
+            // Court already has an assignment - use it (filter null for vacant slots)
+            teamA = courtAssignments[courtNum].slice(0, 2).filter(p => p !== null);
+            teamB = courtAssignments[courtNum].slice(2, 4).filter(p => p !== null);
+        } else {
+            // No assignment yet - derive from selectedPlayers
+            teamA = selectedPlayers.slice(offset, offset + 2).filter(Boolean);
+            teamB = selectedPlayers.slice(offset + 2, offset + 4).filter(Boolean);
+            
+            // Update court assignments and state only if not already recorded
+            if (courtStates[courtNum] !== 'recorded') {
+                if (teamA.length > 0 || teamB.length > 0) {
+                    courtAssignments[courtNum] = [...teamA, ...teamB];
+                    if (teamA.length === 2 && teamB.length === 2) {
+                        courtStates[courtNum] = 'active';
+                    } else {
+                        courtStates[courtNum] = 'empty';
+                    }
+                } else {
+                    courtAssignments[courtNum] = [];
+                    courtStates[courtNum] = 'empty';
+                }
+                
+                // Validate court when assignments change
+                validateCourt(courtNum);
+            }
+        }
+        
+        if (teamA.length === 2 && teamB.length === 2) {
+            // Both teams complete - calculate win probabilities and MMR changes
             const mmrA = calcTeamMMR(teamA);
             const mmrB = calcTeamMMR(teamB);
             const pA = expectedScore(mmrA, mmrB);
             const pB = 1 - pA;
-            renderTeamNamesWithProb(teamAEl, teamA, pA);
-            renderTeamNamesWithProb(teamBEl, teamB, pB);
+            
+            // Calculate MMR changes for win/loss
+            const mmrAWin = calculateMMRChange(mmrA, mmrB, true);
+            const mmrALoss = calculateMMRChange(mmrA, mmrB, false);
+            const mmrBWin = calculateMMRChange(mmrB, mmrA, true);
+            const mmrBLoss = calculateMMRChange(mmrB, mmrA, false);
+            
+            renderTeamNamesWithProb(teamAEl, teamA, pA, mmrAWin, mmrALoss);
+            renderTeamNamesWithProb(teamBEl, teamB, pB, mmrBWin, mmrBLoss);
+        } else if (teamA.length > 0 && teamB.length > 0) {
+            // Both teams have some players but at least one is incomplete (vacancy)
+            renderTeamNamesWithProb(teamAEl, teamA, null);
+            renderTeamNamesWithProb(teamBEl, teamB, null);
         } else if (teamA.length > 0) {
             // Only Team A has players
             renderTeamNamesWithProb(teamAEl, teamA, null);
+            // Clear Team B
             teamBEl.innerHTML = '';
+            const teamBContainer = teamBEl.closest('.team');
+            const wrapperB = teamBContainer?.parentElement;
+            if (wrapperB && wrapperB.classList.contains('team-wrapper')) {
+                const statsB = wrapperB.querySelector('.team-stats-container');
+                if (statsB) statsB.remove();
+            }
         } else if (teamB.length > 0) {
             // Only Team B has players
+            // Clear Team A
             teamAEl.innerHTML = '';
+            const teamAContainer = teamAEl.closest('.team');
+            const wrapperA = teamAContainer?.parentElement;
+            if (wrapperA && wrapperA.classList.contains('team-wrapper')) {
+                const statsA = wrapperA.querySelector('.team-stats-container');
+                if (statsA) statsA.remove();
+            }
             renderTeamNamesWithProb(teamBEl, teamB, null);
         } else {
-            // No players
+            // No players - clear both
             teamAEl.innerHTML = '';
             teamBEl.innerHTML = '';
+            // Clear stats for Team A
+            const teamAContainer = teamAEl.closest('.team');
+            const wrapperA = teamAContainer?.parentElement;
+            if (wrapperA && wrapperA.classList.contains('team-wrapper')) {
+                const statsA = wrapperA.querySelector('.team-stats-container');
+                if (statsA) statsA.remove();
+            }
+            // Clear stats for Team B
+            const teamBContainer = teamBEl.closest('.team');
+            const wrapperB = teamBContainer?.parentElement;
+            if (wrapperB && wrapperB.classList.contains('team-wrapper')) {
+                const statsB = wrapperB.querySelector('.team-stats-container');
+                if (statsB) statsB.remove();
+            }
         }
     };
     
-    // Court 1 (first 4 players)
-    assignAndRenderCourt(0, court1TeamA, court1TeamB);
-    
-    // Court 2 (players 4-7) - show/hide based on dual-court mode
-    if (activePlayersCount >= 8 && selectedPlayers.length >= 8) {
-        // Show court 2
-        if (court2Row) {
-            court2Row.hidden = false;
+    // Render all courts dynamically based on player count
+    for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
+        const courtSection = qs(`#court-${courtNum}-section`);
+        const teamAEl = qs(`#court${courtNum}-teamA`);
+        const teamBEl = qs(`#court${courtNum}-teamB`);
+        
+        if (!courtSection) continue;
+        
+        // Always show courts up to the highest court number that has or had an assignment
+        // This prevents courts from shifting positions when one is cleared
+        const hasAssignment = courtAssignments[courtNum] && courtAssignments[courtNum].length > 0;
+        
+        // Find the highest court number with an assignment
+        let highestCourtWithAssignment = 0;
+        for (let i = 1; i <= MAX_COURTS; i++) {
+            if (courtAssignments[i] && courtAssignments[i].length > 0) {
+                highestCourtWithAssignment = i;
+            }
         }
         
-        // Show court numbers when 8+ players
-        const court1Number = qs('#court-1-number');
-        const court2Number = qs('#court-2-number');
-        if (court1Number) court1Number.hidden = false;
-        if (court2Number) court2Number.hidden = false;
+        // Show if within required courts OR if it's at or below the highest assigned court
+        const shouldShow = courtNum <= Math.max(requiredCourts, highestCourtWithAssignment);
         
-        // Render Court 2 with win probabilities
-        if (court2TeamA && court2TeamB) {
-            assignAndRenderCourt(4, court2TeamA, court2TeamB);
+        if (shouldShow) {
+            courtSection.style.display = 'block';
+            
+            // Render this court's teams
+            if (teamAEl && teamBEl) {
+                const offset = (courtNum - 1) * 4;
+                assignAndRenderCourt(courtNum, offset, teamAEl, teamBEl);
+            }
+        } else {
+            courtSection.style.display = 'none';
         }
-    } else {
-        // Hide court 2
-        if (court2Row) {
-            court2Row.hidden = true;
-        }
-        
-        // Hide court numbers when less than 8 players
-        const court1Number = qs('#court-1-number');
-        const court2Number = qs('#court-2-number');
-        if (court1Number) court1Number.hidden = true;
-        if (court2Number) court2Number.hidden = true;
     }
 }
 
@@ -2588,6 +3479,548 @@ function validateForm() {
     if (debugBet) debugBet.textContent = `Bet: ${selectedBet !== null ? '$' + selectedBet : 'Not selected'}`;
     if (debugScores) debugScores.textContent = `Scores: ${hasScores ? 'Yes' : 'No'}`;
     if (debugButton) debugButton.textContent = `Button: ${isValid ? 'Enabled' : 'Disabled'}`;
+}
+
+// Validate individual court (for dual-court mode)
+function validateCourt(courtNum) {
+    const scoreA = qs(`#court${courtNum}-score-a`);
+    const scoreB = qs(`#court${courtNum}-score-b`);
+    const recordBtn = qs(`#recordCourt${courtNum}Btn`);
+    
+    if (!recordBtn) return;
+    
+    // Skip validation if court is already recorded
+    if (courtStates[courtNum] === 'recorded') {
+        recordBtn.disabled = true;
+        return;
+    }
+    
+    // Check if we have exactly 4 players assigned to this court
+    const courtPlayers = courtAssignments[courtNum];
+    const hasPlayers = courtPlayers && courtPlayers.length === 4 && courtPlayers.every(p => p !== null);
+    
+    // Check if scores are valid
+    const hasScores = scoreA && scoreB &&
+        scoreA.value !== '' && scoreB.value !== '' &&
+        parseInt(scoreA.value) >= 0 && parseInt(scoreB.value) >= 0;
+    
+    // Check if bet is selected
+    const hasBet = selectedBets[courtNum] !== null;
+    
+    const isValid = hasPlayers && hasScores && hasBet;
+    recordBtn.disabled = !isValid;
+}
+
+// Record match for individual court
+async function recordCourt(courtNum) {
+    console.log(`recordCourt called for court ${courtNum}`);
+    console.log('Court assignments:', courtAssignments[courtNum]);
+    console.log('Selected bet:', selectedBets[courtNum]);
+    
+    try {
+        const scoreA = parseInt(qs(`#court${courtNum}-score-a`).value);
+        const scoreB = parseInt(qs(`#court${courtNum}-score-b`).value);
+        const players = courtAssignments[courtNum];
+        
+        if (!players || players.length !== 4 || players.some(p => p === null)) {
+            toast('Invalid player assignment', 'error');
+            return;
+        }
+        
+        // Get no-bet status for each player
+        const playerNoBetStatus = {};
+        players.forEach(playerName => {
+            const player = allPlayers.find(p => {
+                const name = typeof p === 'string' ? p : p.name;
+                return name === playerName;
+            });
+            playerNoBetStatus[playerName] = player?.no_bet === true;
+        });
+        
+        const payload = {
+            team1: players.slice(0, 2),
+            team2: players.slice(2, 4),
+            team1_score: scoreA,
+            team2_score: scoreB,
+            game_value: selectedBets[courtNum],
+            player_no_bet_status: playerNoBetStatus
+        };
+        
+        console.log(`Court ${courtNum} Payload:`, payload);
+        
+        // Submit match
+        const result = await api('./api/matches', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        
+        console.log(`Court ${courtNum} match recorded:`, result);
+        toast(`Court ${courtNum} recorded successfully!`);
+        
+        // Save players before clearing (need this for selectedPlayers cleanup)
+        const clearedPlayers = [...courtAssignments[courtNum]];
+        
+        // Auto-clear court after recording (no manual clear needed)
+        courtStates[courtNum] = 'empty';
+        courtAssignments[courtNum] = [];
+        selectedBets[courtNum] = 1; // Reset to $1 default
+        
+        // Clear score inputs
+        const scoreAInput = qs(`#court${courtNum}-score-a`);
+        const scoreBInput = qs(`#court${courtNum}-score-b`);
+        if (scoreAInput) {
+            scoreAInput.value = '';
+            scoreAInput.disabled = false;
+        }
+        if (scoreBInput) {
+            scoreBInput.value = '';
+            scoreBInput.disabled = false;
+        }
+        
+        // Reset bet selection to $1 for this court
+        qsa(`.btn-bet[data-court="${courtNum}"]`).forEach(btn => {
+            const betValue = parseInt(btn.dataset.value);
+            btn.classList.toggle('selected', betValue === 1);
+            btn.setAttribute('aria-pressed', betValue === 1 ? 'true' : 'false');
+            btn.disabled = false;
+        });
+        
+        // Clear team displays
+        const teamAEl = qs(`#court${courtNum}-teamA`);
+        const teamBEl = qs(`#court${courtNum}-teamB`);
+        if (teamAEl) teamAEl.innerHTML = '';
+        if (teamBEl) teamBEl.innerHTML = '';
+        
+        // Remove only this court's players from selectedPlayers
+        clearedPlayers.forEach(player => {
+            const index = selectedPlayers.indexOf(player);
+            if (index > -1) {
+                selectedPlayers.splice(index, 1);
+            }
+            
+            // Clear visual state
+            const btn = qs(`.player-name-btn[data-player="${player}"]`);
+            if (btn) {
+                btn.classList.remove('selected', 'team-a', 'team-b', `court-${courtNum}`);
+                btn.setAttribute('aria-pressed', 'false');
+            }
+        });
+        
+        // Update player button states only (don't update team preview to avoid shifting courts)
+        updatePlayerButtonStates();
+        
+        // Validate the court that was just cleared
+        validateCourt(courtNum);
+        
+        // Reload data (skip loadRecommendations to preserve current recommendations)
+        await loadMatchHistory();
+        await loadSessionStats();
+        await loadPlayerEarnings();
+        await loadSessionLogs();
+    } catch (error) {
+        console.error(`Error recording court ${courtNum}:`, error);
+        toast(error.message || `Failed to record court ${courtNum}`, 'error');
+    }
+}
+
+// Cycle single court to get new recommendation
+async function cycleSingleCourt(courtNum) {
+    console.log(`cycleSingleCourt called for court ${courtNum}`);
+    
+    try {
+        // Collect existing partnerships from other courts to exclude
+        const existingPartnerships = [];
+        for (let i = 1; i <= 5; i++) {
+            if (i !== courtNum && courtAssignments[i] && courtAssignments[i].length === 4 && courtAssignments[i].every(p => p !== null)) {
+                // Extract the two partnerships (team A and team B)
+                const teamA = courtAssignments[i].slice(0, 2).sort();
+                const teamB = courtAssignments[i].slice(2, 4).sort();
+                existingPartnerships.push(teamA);
+                existingPartnerships.push(teamB);
+            }
+        }
+        
+        // Fetch new recommendation for this court, excluding existing partnerships
+        const queryParams = existingPartnerships.length > 0 
+            ? '?exclude_partnerships=' + encodeURIComponent(JSON.stringify(existingPartnerships))
+            : '';
+        const response = await api(`./api/recommendations/court${queryParams}`);
+        console.log(`Got new recommendation for court ${courtNum}:`, response);
+        
+        if (!response || !response.team_a || !response.team_b) {
+            toast('No recommendation available', 'error');
+            return;
+        }
+        
+        // Get the current players on this court (if any), filtering out vacancies
+        const currentPlayers = (courtAssignments[courtNum] || []).filter(p => p !== null);
+        
+        // Update court assignments with new recommendation
+        const newPlayers = [...response.team_a, ...response.team_b];
+        courtAssignments[courtNum] = newPlayers;
+        courtStates[courtNum] = 'active';
+        
+        // Update team display
+        const teamAEl = qs(`#court${courtNum}-teamA`);
+        const teamBEl = qs(`#court${courtNum}-teamB`);
+        
+        if (teamAEl && teamBEl) {
+            // Calculate win probabilities
+            const mmrA = calcTeamMMR(response.team_a);
+            const mmrB = calcTeamMMR(response.team_b);
+            const pA = expectedScore(mmrA, mmrB);
+            const pB = 1 - pA;
+            
+            renderTeamNamesWithProb(teamAEl, response.team_a, pA);
+            renderTeamNamesWithProb(teamBEl, response.team_b, pB);
+        }
+        
+        // Clear previous player selection for this court and add new ones
+        // Remove old players from selectedPlayers
+        currentPlayers.forEach(player => {
+            const index = selectedPlayers.indexOf(player);
+            if (index > -1) {
+                selectedPlayers.splice(index, 1);
+            }
+            
+            // Clear visual state from old players
+            const btn = qs(`.player-name-btn[data-player="${player}"]`);
+            if (btn) {
+                btn.classList.remove('selected', 'team-a', 'team-b', `court-${courtNum}`);
+                btn.setAttribute('aria-pressed', 'false');
+            }
+        });
+        
+        // Add new players to selectedPlayers and update visual state
+        newPlayers.forEach((player, idx) => {
+            if (!selectedPlayers.includes(player)) {
+                selectedPlayers.push(player);
+            }
+            
+            const btn = qs(`.player-name-btn[data-player="${player}"]`);
+            if (btn) {
+                const teamClass = idx < 2 ? 'team-a' : 'team-b';
+                btn.classList.add('selected', teamClass, `court-${courtNum}`);
+                btn.setAttribute('aria-pressed', 'true');
+            }
+        });
+        
+        // Validate this court
+        validateCourt(courtNum);
+        
+        // Update button states
+        updatePlayerButtonStates();
+        
+        console.log(`Court ${courtNum} cycled successfully`);
+    } catch (error) {
+        console.error(`Error cycling court ${courtNum}:`, error);
+        toast(error.message || `Failed to get recommendation for court ${courtNum}`, 'error');
+    }
+}
+
+// Clear recorded court to allow re-recording
+function clearCourt(courtNum) {
+    console.log(`clearCourt called for court ${courtNum}`);
+    
+    // Capture players before clearing court assignment
+    const playersToRemove = courtAssignments[courtNum] || [];
+    
+    // Reset court state
+    courtStates[courtNum] = 'empty';
+    courtAssignments[courtNum] = [];
+    selectedBets[courtNum] = null;
+    
+    // Update UI
+    const courtSection = qs(`#court-${courtNum}-section`);
+    if (courtSection) {
+        courtSection.setAttribute('data-state', 'empty');
+    }
+    
+    // Clear status
+    const statusEl = qs(`#court-${courtNum}-status`);
+    if (statusEl) {
+        statusEl.textContent = '';
+    }
+    
+    // Clear scores
+    const scoreA = qs(`#court${courtNum}-score-a`);
+    const scoreB = qs(`#court${courtNum}-score-b`);
+    if (scoreA) {
+        scoreA.value = '';
+        scoreA.disabled = false;
+    }
+    if (scoreB) {
+        scoreB.value = '';
+        scoreB.disabled = false;
+    }
+    
+    // Clear team names and stats containers
+    const teamA = qs(`#court${courtNum}-teamA`);
+    const teamB = qs(`#court${courtNum}-teamB`);
+    if (teamA) {
+        teamA.textContent = '';
+        // Remove stats container if it exists
+        const teamAContainer = teamA.closest('.team');
+        const wrapperA = teamAContainer?.parentElement;
+        if (wrapperA && wrapperA.classList.contains('team-wrapper')) {
+            const statsA = wrapperA.querySelector('.team-stats-container');
+            if (statsA) statsA.remove();
+        }
+    }
+    if (teamB) {
+        teamB.textContent = '';
+        // Remove stats container if it exists
+        const teamBContainer = teamB.closest('.team');
+        const wrapperB = teamBContainer?.parentElement;
+        if (wrapperB && wrapperB.classList.contains('team-wrapper')) {
+            const statsB = wrapperB.querySelector('.team-stats-container');
+            if (statsB) statsB.remove();
+        }
+    }
+    
+    // Enable bet buttons
+    qsa(`.btn-bet[data-court="${courtNum}"]`).forEach(btn => {
+        btn.disabled = false;
+        btn.classList.remove('selected');
+        btn.setAttribute('aria-pressed', 'false');
+    });
+    
+    // Show record button and hide clear button
+    const recordBtn = qs(`#recordCourt${courtNum}Btn`);
+    const clearBtn = qs(`#clearCourt${courtNum}Btn`);
+    if (recordBtn) {
+        recordBtn.style.display = 'inline-block';
+        recordBtn.disabled = true;
+    }
+    if (clearBtn) clearBtn.style.display = 'none';
+    
+    // Remove court assignments from selected players
+    playersToRemove.forEach(playerName => {
+        const index = selectedPlayers.indexOf(playerName);
+        if (index > -1) {
+            selectedPlayers.splice(index, 1);
+        }
+        
+        // Update player button
+        const btn = qs(`.player-name-btn[data-player="${playerName}"]`);
+        if (btn) {
+            btn.classList.remove('selected', 'team-a', 'team-b', `court-${courtNum}`);
+            btn.setAttribute('aria-pressed', 'false');
+        }
+    });
+    
+    updatePlayerButtonStates();
+}
+
+// ==================== On Deck Queue Functions ====================
+
+// Load a recommendation for a queue slot
+async function loadQueuedMatchup(slotNum) {
+    try {
+        // Collect existing partnerships from active courts AND queue
+        const existingPartnerships = [];
+        const activePlayers = new Set();
+        
+        // From active courts (not recorded)
+        for (let i = 1; i <= MAX_COURTS; i++) {
+            if (courtStates[i] !== 'recorded' && courtAssignments[i] && courtAssignments[i].length === 4 && courtAssignments[i].every(p => p !== null)) {
+                const teamA = courtAssignments[i].slice(0, 2).sort();
+                const teamB = courtAssignments[i].slice(2, 4).sort();
+                existingPartnerships.push(teamA);
+                existingPartnerships.push(teamB);
+                
+                // Track individual players on active courts
+                courtAssignments[i].forEach(player => activePlayers.add(player));
+            }
+        }
+        
+        // From queue (excluding the slot we're filling)
+        queuedMatchups.forEach((matchup, idx) => {
+            if (idx !== slotNum) {
+                existingPartnerships.push([...matchup.teamA].sort());
+                existingPartnerships.push([...matchup.teamB].sort());
+            }
+        });
+        
+        // Fetch recommendation
+        let queryParams = '';
+        const params = [];
+        
+        if (existingPartnerships.length > 0) {
+            params.push('exclude_partnerships=' + encodeURIComponent(JSON.stringify(existingPartnerships)));
+        }
+        if (activePlayers.size > 0) {
+            params.push('exclude_players=' + encodeURIComponent(JSON.stringify([...activePlayers])));
+        }
+        
+        if (params.length > 0) {
+            queryParams = '?' + params.join('&');
+        }
+        
+        const response = await api(`./api/recommendations/court${queryParams}`);
+        
+        if (!response || !response.team_a || !response.team_b) {
+            toast('No recommendation available', 'error');
+            return;
+        }
+        
+        // Add to queue
+        const matchup = {
+            id: nextQueueId++,
+            teamA: response.team_a,
+            teamB: response.team_b
+        };
+        
+        if (slotNum < queuedMatchups.length) {
+            queuedMatchups[slotNum] = matchup;
+        } else {
+            queuedMatchups.push(matchup);
+        }
+        
+        renderQueue();
+        toast(`Queue slot ${slotNum + 1} filled`);
+    } catch (error) {
+        console.error(`Error loading queue matchup:`, error);
+        toast(error.message || 'Failed to load recommendation', 'error');
+    }
+}
+
+// Assign a queued matchup to a court
+function assignQueueToCourt(queueIdx, courtNum) {
+    const matchup = queuedMatchups[queueIdx];
+    if (!matchup) {
+        toast('Queue slot is empty', 'error');
+        return;
+    }
+    
+    // Clear current court assignment
+    courtAssignments[courtNum] = [];
+    
+    // Assign matchup to court
+    const players = [...matchup.teamA, ...matchup.teamB];
+    courtAssignments[courtNum] = players;
+    courtStates[courtNum] = 'active';
+    
+    // Update team display
+    const teamAEl = qs(`#court${courtNum}-teamA`);
+    const teamBEl = qs(`#court${courtNum}-teamB`);
+    
+    if (teamAEl && teamBEl) {
+        // Calculate win probabilities
+        const mmrA = calcTeamMMR(matchup.teamA);
+        const mmrB = calcTeamMMR(matchup.teamB);
+        const pA = expectedScore(mmrA, mmrB);
+        const pB = 1 - pA;
+        
+        renderTeamNamesWithProb(teamAEl, matchup.teamA, pA);
+        renderTeamNamesWithProb(teamBEl, matchup.teamB, pB);
+    }
+    
+    // Remove from queue
+    queuedMatchups.splice(queueIdx, 1);
+    renderQueue();
+    
+    toast(`Assigned to Court ${courtNum}`);
+}
+
+// Clear a queue slot
+function clearQueueSlot(slotNum) {
+    if (slotNum < queuedMatchups.length) {
+        queuedMatchups.splice(slotNum, 1);
+        renderQueue();
+    }
+}
+
+// Toggle queue visibility
+function toggleQueue() {
+    const container = qs('#queueContainer');
+    const icon = qs('#queueToggleIcon');
+    const section = qs('#queueSection');
+    
+    if (!container || !icon) return;
+    
+    const isHidden = container.style.display === 'none';
+    
+    if (isHidden) {
+        container.style.display = 'flex';
+        icon.textContent = '▼';
+        section.classList.remove('queue-section--minimized');
+    } else {
+        container.style.display = 'none';
+        icon.textContent = '▶';
+        section.classList.add('queue-section--minimized');
+    }
+}
+
+// Render the queue UI
+function renderQueue() {
+    const container = qs('#queueContainer');
+    if (!container) return;
+    
+    let html = '';
+    
+    for (let i = 0; i < MAX_QUEUE_SLOTS; i++) {
+        const matchup = queuedMatchups[i];
+        
+        if (matchup) {
+            // Calculate win probabilities
+            const mmrA = calcTeamMMR(matchup.teamA);
+            const mmrB = calcTeamMMR(matchup.teamB);
+            const pA = expectedScore(mmrA, mmrB);
+            const pB = 1 - pA;
+            
+            const teamANames = matchup.teamA.join(' / ');
+            const teamBNames = matchup.teamB.join(' / ');
+            
+            // Determine which courts are available (empty or recorded)
+            const availableCourts = [];
+            for (let c = 1; c <= getRequiredCourts(); c++) {
+                availableCourts.push(c);
+            }
+            
+            const courtButtons = availableCourts.map(c => {
+                // Check if court is available (empty or recorded, not active)
+                const isAvailable = courtStates[c] === 'empty' || courtStates[c] === 'recorded';
+                const btnClass = isAvailable ? 'queue-court-btn queue-court-btn--available' : 'queue-court-btn';
+                return `<button class="${btnClass}" onclick="assignQueueToCourt(${i}, ${c})">${c}</button>`;
+            }).join('');
+            
+            html += `
+                <div class="queue-slot" data-slot="${i}">
+                    <div class="queue-matchup">
+                        <div class="queue-team queue-team-a">
+                            <span class="queue-team-names">${escapeHtml(teamANames)}</span>
+                            <span class="queue-team-prob">${(pA * 100).toFixed(0)}%</span>
+                        </div>
+                        <div class="queue-vs">VS</div>
+                        <div class="queue-team queue-team-b">
+                            <span class="queue-team-names">${escapeHtml(teamBNames)}</span>
+                            <span class="queue-team-prob">${(pB * 100).toFixed(0)}%</span>
+                        </div>
+                    </div>
+                    <div class="queue-actions">
+                        <span class="queue-actions-label">Assign to:</span>
+                        <div class="queue-court-buttons">
+                            ${courtButtons}
+                        </div>
+                        <button class="btn btn-sm btn-secondary" onclick="clearQueueSlot(${i})">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="queue-slot queue-slot--empty" data-slot="${i}">
+                    <button class="btn btn-primary" onclick="loadQueuedMatchup(${i})">
+                        🎯 Get Recommendation
+                    </button>
+                </div>
+            `;
+        }
+    }
+    
+    container.innerHTML = html;
 }
 
 async function handleRecordMatch() {
@@ -2678,13 +4111,12 @@ async function handleRecordMatch() {
         console.log('Resetting form...');
         resetMatchForm();
         
-        // Reload data
+        // Reload data (skip loadRecommendations to preserve current recommendations)
         console.log('Reloading data...');
         await loadMatchHistory();
         await loadSessionStats();
         await loadPlayerEarnings();
-        await loadQueueData();
-        await loadRecommendations();
+        await loadSessionLogs();
         console.log('All done!');
     } catch (error) {
         console.error('Error recording match:', error);
@@ -2699,7 +4131,7 @@ function resetMatchForm() {
     
     // Clear from name buttons and remove court classes
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2');
+        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
         btn.setAttribute('aria-pressed', 'false');
         // Don't modify disabled state - renderPlayers handles that based on active status
     });
@@ -3115,6 +4547,106 @@ async function loadQueueData() {
     }
 }
 
+// ==================== Session Logs ====================
+
+async function loadSessionLogs() {
+    const container = qs('#logsContainer');
+    if (!container) return;
+    
+    try {
+        if (!currentSession || !currentSession.session_id) return;
+        
+        // Fetch session matches and all-time earnings in parallel
+        const [sessionData, allTimeEarnings] = await Promise.all([
+            api(`./api/sessions/${currentSession.session_id}`),
+            api('./api/earnings')
+        ]);
+        const matches = sessionData.matches || [];
+        
+        if (matches.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem;">No logs yet</div>';
+            return;
+        }
+        
+        // Build current all-time earnings lookup
+        const earningsMap = {};
+        allTimeEarnings.forEach(e => { earningsMap[e.player] = e.net_earnings; });
+        
+        // Build current MMR lookup
+        const mmrMap = {};
+        allPlayers.forEach(p => {
+            const name = typeof p === 'string' ? p : p.name;
+            const mmr = (typeof p === 'object' && p.mmr) ? p.mmr : 1500;
+            mmrMap[name] = Math.round(mmr);
+        });
+        
+        // Sort newest first
+        matches.sort((a, b) => {
+            const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return tB - tA;
+        });
+        
+        // Running trackers start at current values (after all matches)
+        const runEarnings = { ...earningsMap };
+        const runMMR = { ...mmrMap };
+        
+        const groupsHtml = matches.map(match => {
+            const ts = match.timestamp ? formatTime(match.timestamp) : '';
+            const team1 = match.team1 || [];
+            const team2 = match.team2 || [];
+            const team1Won = match.team1_score > match.team2_score;
+            const winners = team1Won ? team1 : team2;
+            const losers = team1Won ? team2 : team1;
+            const bet = match.game_value || 0;
+            const noBet = match.player_no_bet_status || {};
+            
+            // Compute MMR change using running MMR values
+            const winTeamMMR = winners.reduce((s, p) => s + (runMMR[p] || 1500), 0) / (winners.length || 1);
+            const loseTeamMMR = losers.reduce((s, p) => s + (runMMR[p] || 1500), 0) / (losers.length || 1);
+            const mmrGain = Math.round(calculateMMRChange(winTeamMMR, loseTeamMMR, true));
+            const mmrLoss = Math.round(calculateMMRChange(loseTeamMMR, winTeamMMR, false));
+            
+            // Match summary line
+            const matchLine = `<div class="log-entry log-match"><span class="log-time">${escapeHtml(ts)}</span><span class="log-msg">${escapeHtml(winners.join(' & '))} <span class="log-pwned">Pwned</span> ${escapeHtml(losers.join(' & '))}</span></div>`;
+            
+            // Winner lines - show total $ and MMR AFTER this match with deltas
+            const winnerLines = winners.map(p => {
+                const totalE = formatCurrency(runEarnings[p] || 0);
+                const eDelta = noBet[p] ? 0 : bet;
+                const eDeltaStr = eDelta > 0 ? `+${formatCurrency(eDelta)}` : formatCurrency(0);
+                const mmrAfter = runMMR[p] || 1500;
+return `<div class="log-entry log-win"><span class="log-time">${escapeHtml(ts)}</span><span class="log-msg">${escapeHtml(p)} ${totalE}(${eDeltaStr}) ${mmrAfter}(+${mmrGain}) mmr</span></div>`;
+            }).join('');
+            
+            // Loser lines - show total $ and MMR AFTER this match with deltas
+            const loserLines = losers.map(p => {
+                const totalE = formatCurrency(runEarnings[p] || 0);
+                const eDelta = noBet[p] ? 0 : bet;
+                const eDeltaStr = eDelta > 0 ? `-${formatCurrency(eDelta)}` : formatCurrency(0);
+                const mmrAfter = runMMR[p] || 1500;
+return `<div class="log-entry log-loss"><span class="log-time">${escapeHtml(ts)}</span><span class="log-msg">${escapeHtml(p)} ${totalE}(${eDeltaStr}) ${mmrAfter}(${mmrLoss}) mmr</span></div>`;
+            }).join('');
+            
+            // Subtract deltas to get state BEFORE this match (for next older match)
+            winners.forEach(p => {
+                runEarnings[p] = (runEarnings[p] || 0) - (noBet[p] ? 0 : bet);
+                runMMR[p] = (runMMR[p] || 1500) - mmrGain;
+            });
+            losers.forEach(p => {
+                runEarnings[p] = (runEarnings[p] || 0) + (noBet[p] ? 0 : bet);
+                runMMR[p] = (runMMR[p] || 1500) - mmrLoss;
+            });
+            
+            return `<div class="log-group">${matchLine}${winnerLines}${loserLines}</div>`;
+        }).join('');
+        
+        container.innerHTML = groupsHtml;
+    } catch (error) {
+        console.error('Failed to load session logs:', error);
+    }
+}
+
 // ==================== History Page ====================
 
 let sessionsCache = {};
@@ -3380,6 +4912,15 @@ async function loadSessions(page = 1) {
                                                 onclick="switchHistoryTab('${session.session_id}', 'teams')">
                                             Teams
                                         </button>
+                                        <button type="button" 
+                                                class="tab-item" 
+                                                data-session-id="${session.session_id}"
+                                                data-tab-target="logs" 
+                                                role="tab" 
+                                                aria-selected="false"
+                                                onclick="switchHistoryTab('${session.session_id}', 'logs')">
+                                            Logs
+                                        </button>
                                     </nav>
                                 </div>
                                 <div class="carousel-card-body">
@@ -3438,6 +4979,13 @@ async function loadSessions(page = 1) {
                                             <div id="teams-${session.session_id}" class="win-rate-list">
                                                 <div style="color: var(--text-muted); font-size: 0.875rem;">Loading...</div>
                                             </div>
+                                        </div>
+                                    </section>
+                                    
+                                    <!-- Pane 5: Logs (hidden by default) -->
+                                    <section id="pane-logs-${session.session_id}" class="carousel-pane" role="tabpanel" hidden>
+                                        <div class="logs-container" id="logs-${session.session_id}">
+                                            <div style="color: var(--text-muted); font-size: 0.875rem;">Loading...</div>
                                         </div>
                                     </section>
                                 </div>
@@ -3867,10 +5415,11 @@ async function loadSessionMatches(sessionId) {
             </div>
         `;
         
-        // Load session earnings, stats, and partnerships
+        // Load session earnings, stats, partnerships, and logs
         await loadSessionEarnings(sessionId);
         await loadHistorySessionStats(sessionId);
         await loadHistorySessionPartnerships(sessionId);
+        await loadHistorySessionLogs(sessionId);
     } catch (error) {
         toast('Failed to load session matches', 'error');
     }
@@ -3948,6 +5497,103 @@ async function loadHistorySessionStats(sessionId) {
     } catch (error) {
         console.error('Failed to load history session stats:', error);
         // Don't show error toast for this - it's a non-critical feature
+    }
+}
+
+async function loadHistorySessionLogs(sessionId) {
+    const container = qs(`#logs-${sessionId}`);
+    if (!container) return;
+
+    try {
+        // Fetch session matches and all-time earnings in parallel
+        const [sessionData, allTimeEarnings, playersData] = await Promise.all([
+            api(`./api/sessions/${sessionId}`),
+            api('./api/earnings'),
+            api('./api/players/stats')
+        ]);
+        const matches = sessionData.matches || [];
+
+        if (matches.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem;">No logs yet</div>';
+            return;
+        }
+
+        // Build current all-time earnings lookup
+        const earningsMap = {};
+        allTimeEarnings.forEach(e => { earningsMap[e.player] = e.net_earnings; });
+
+        // Build current MMR lookup from players stats
+        const mmrMap = {};
+        playersData.forEach(p => {
+            const name = typeof p === 'string' ? p : (p.name || p.username);
+            const mmr = (typeof p === 'object' && p.mmr) ? p.mmr : 1500;
+            mmrMap[name] = Math.round(mmr);
+        });
+
+        // Sort newest first
+        matches.sort((a, b) => {
+            const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return tB - tA;
+        });
+
+        // Running trackers start at current values (after all matches)
+        const runEarnings = { ...earningsMap };
+        const runMMR = { ...mmrMap };
+
+        const groupsHtml = matches.map(match => {
+            const ts = match.timestamp ? formatTime(match.timestamp) : '';
+            const team1 = match.team1 || [];
+            const team2 = match.team2 || [];
+            const team1Won = match.team1_score > match.team2_score;
+            const winners = team1Won ? team1 : team2;
+            const losers = team1Won ? team2 : team1;
+            const bet = match.game_value || 0;
+            const noBet = match.player_no_bet_status || {};
+
+            // Compute MMR change using running MMR values
+            const winTeamMMR = winners.reduce((s, p) => s + (runMMR[p] || 1500), 0) / (winners.length || 1);
+            const loseTeamMMR = losers.reduce((s, p) => s + (runMMR[p] || 1500), 0) / (losers.length || 1);
+            const mmrGain = Math.round(calculateMMRChange(winTeamMMR, loseTeamMMR, true));
+            const mmrLoss = Math.round(calculateMMRChange(loseTeamMMR, winTeamMMR, false));
+
+            // Match summary line
+            const matchLine = `<div class="log-entry log-match"><span class="log-time">${escapeHtml(ts)}</span><span class="log-msg">${escapeHtml(winners.join(' & '))} <span class="log-pwned">Pwned</span> ${escapeHtml(losers.join(' & '))}</span></div>`;
+
+            // Winner lines
+            const winnerLines = winners.map(p => {
+                const totalE = formatCurrency(runEarnings[p] || 0);
+                const eDelta = noBet[p] ? 0 : bet;
+                const eDeltaStr = eDelta > 0 ? `+${formatCurrency(eDelta)}` : formatCurrency(0);
+                const mmrAfter = runMMR[p] || 1500;
+                return `<div class="log-entry log-win"><span class="log-time">${escapeHtml(ts)}</span><span class="log-msg">${escapeHtml(p)} ${totalE}(${eDeltaStr}) ${mmrAfter}(+${mmrGain}) mmr</span></div>`;
+            }).join('');
+
+            // Loser lines
+            const loserLines = losers.map(p => {
+                const totalE = formatCurrency(runEarnings[p] || 0);
+                const eDelta = noBet[p] ? 0 : bet;
+                const eDeltaStr = eDelta > 0 ? `-${formatCurrency(eDelta)}` : formatCurrency(0);
+                const mmrAfter = runMMR[p] || 1500;
+                return `<div class="log-entry log-loss"><span class="log-time">${escapeHtml(ts)}</span><span class="log-msg">${escapeHtml(p)} ${totalE}(${eDeltaStr}) ${mmrAfter}(${mmrLoss}) mmr</span></div>`;
+            }).join('');
+
+            // Subtract deltas to get state BEFORE this match (for next older match)
+            winners.forEach(p => {
+                runEarnings[p] = (runEarnings[p] || 0) - (noBet[p] ? 0 : bet);
+                runMMR[p] = (runMMR[p] || 1500) - mmrGain;
+            });
+            losers.forEach(p => {
+                runEarnings[p] = (runEarnings[p] || 0) + (noBet[p] ? 0 : bet);
+                runMMR[p] = (runMMR[p] || 1500) - mmrLoss;
+            });
+
+            return `<div class="log-group">${matchLine}${winnerLines}${loserLines}</div>`;
+        }).join('');
+
+        container.innerHTML = groupsHtml;
+    } catch (error) {
+        console.error('Failed to load history session logs:', error);
     }
 }
 
@@ -4042,7 +5688,8 @@ function switchHistoryTab(sessionId, target) {
         'history': qs(`#pane-history-${sessionId}`),
         'earnings': qs(`#pane-earnings-${sessionId}`),
         'stats': qs(`#pane-stats-${sessionId}`),
-        'teams': qs(`#pane-teams-${sessionId}`)
+        'teams': qs(`#pane-teams-${sessionId}`),
+        'logs': qs(`#pane-logs-${sessionId}`)
     };
     
     const tabs = qsa(`button[data-session-id="${sessionId}"]`);
@@ -4066,6 +5713,11 @@ function switchHistoryTab(sessionId, target) {
         tab.setAttribute('aria-selected', String(isActive));
         tab.tabIndex = isActive ? 0 : -1;
     });
+
+    // Reload logs when Logs tab is activated
+    if (target === 'logs') {
+        loadHistorySessionLogs(sessionId);
+    }
 }
 
 async function deleteSession(sessionId, matchCount) {
@@ -4770,7 +6422,7 @@ function renderPlayerWinRates(players) {
         const mmr = player.mmr || 1500;
         nameCell.innerHTML = `
             <span class="mmr-badge">${Math.round(mmr)}</span>
-            ${escapeHtml(player.name)}
+            <a href="./player/${encodeURIComponent(player.name)}" class="player-link">${escapeHtml(player.name)}</a>
         `;
         nameCell.title = `${player.name} - MMR: ${Math.round(mmr)}`; // Tooltip
         
@@ -5126,17 +6778,17 @@ function initCarouselTabs() {
         'match-history': qs('#pane-match-history'),
         'player-earnings': qs('#pane-player-earnings'),
         'partnership-stats': qs('#pane-partnership-stats'),
-        'queue': qs('#pane-queue')
+        'logs': qs('#pane-logs')
     };
 
-    // Verify core panes exist (Queue is optional)
+    // Verify core panes exist (Logs is optional)
     if (!panes['match-history'] || !panes['player-earnings'] || !panes['partnership-stats']) {
         console.warn('Carousel tabs: One or more core panes not found');
         return;
     }
     
-    if (!panes['queue']) {
-        console.warn('Carousel tabs: Queue pane not found (optional)');
+    if (!panes['logs']) {
+        console.warn('Carousel tabs: Logs pane not found (optional)');
     }
 
     function activate(target) {
@@ -5166,9 +6818,9 @@ function initCarouselTabs() {
         tab.addEventListener('click', () => {
             const target = tab.dataset.tabTarget;
             activate(target);
-            // Load queue data when Queue tab is activated
-            if (target === 'queue') {
-                loadQueueData();
+            // Reload logs when Logs tab is activated
+            if (target === 'logs') {
+                loadSessionLogs();
             }
         });
     });

@@ -5,10 +5,17 @@ SQLAlchemy ORM models for users, sessions, matches, and player statistics.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum
+from zoneinfo import ZoneInfo
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum, JSON
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 import enum
+
+_PACIFIC = ZoneInfo('America/Los_Angeles')
+
+def _now_pacific():
+    """Return current time in Pacific timezone as a naive datetime."""
+    return datetime.now(_PACIFIC).replace(tzinfo=None)
 
 Base = declarative_base()
 
@@ -28,8 +35,8 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(SQLEnum(UserRole), nullable=False, default=UserRole.PLAYER)
     mmr = Column(Float, nullable=False, default=1500.0)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_now_pacific)
+    updated_at = Column(DateTime, nullable=False, default=_now_pacific, onupdate=_now_pacific)
     
     # Relationships
     matches_as_team1_player1 = relationship('Match', foreign_keys='Match.team1_player1_id', back_populates='team1_player1')
@@ -78,7 +85,7 @@ class Session(Base):
     id = Column(Integer, primary_key=True)
     session_date = Column(DateTime, nullable=False, index=True)
     notes = Column(String(500), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_now_pacific)
     
     # Relationships
     matches = relationship('Match', back_populates='session', cascade='all, delete-orphan')
@@ -124,7 +131,10 @@ class Match(Base):
     # MMR tracking
     mmr_change = Column(Float, nullable=False, default=0.0)
     
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # No-bet player tracking (JSON dict of player_name: bool)
+    player_no_bet_status = Column(JSON, nullable=True)
+    
+    created_at = Column(DateTime, nullable=False, default=_now_pacific)
     
     # Relationships
     session = relationship('Session', back_populates='matches')

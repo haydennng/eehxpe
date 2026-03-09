@@ -103,7 +103,7 @@
     <!-- JavaScript -->
     {% block extra_js %}{% endblock %}
     {% block main_js %}
-    <script src="/badminton/static/js/main.js?v=1767444723" defer></script>
+    <script src="/badminton/static/js/main.js?v={{ range(1, 999999999) | random }}" defer></script>
     {% endblock %}
     
     <!-- PWA Service Worker Registration -->

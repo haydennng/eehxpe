@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+
+{% block title %}{{ player_username }} - Player Profile{% endblock %}
+{% block page_id %}profile{% endblock %}
+
+{% block content %}
+<div class="profile-container">
+    <!-- User Header (Public View - No Actions) -->
+    <div class="profile-header">
+        <div class="profile-info">
+            <div class="profile-avatar">
+                <div class="avatar-circle" id="player-avatar">?</div>
+            </div>
+            <div class="profile-details">
+                <h1 class="profile-username" id="player-username">{{ player_username }}</h1>
+                <p class="profile-role" id="player-role">Player</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Personal Stats Grid -->
+    <div class="section-header">
+        <h2>Personal Stats</h2>
+    </div>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">🏆</div>
+            <div class="stat-value" id="mmr-value">-</div>
+            <div class="stat-label">MMR Rating</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">🎯</div>
+            <div class="stat-value" id="matches-value">-</div>
+            <div class="stat-label">Total Matches</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-value" id="winrate-value">-</div>
+            <div class="stat-label">Win Rate</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-value" id="earnings-value">-</div>
+            <div class="stat-label">Net Earnings</div>
+        </div>
+    </div>
+    
+    <!-- Top 5 Partners by Win Rate -->
+    <div class="section-header">
+        <h2>Top 5 Partners (by Win Rate)</h2>
+        <p class="section-subtitle">Minimum 5 games played together</p>
+    </div>
+    <div class="card">
+        <div class="winrates-list" id="top-partners-winrate">
+            <div class="loading">Loading partners...</div>
+        </div>
+    </div>
+    
+    <!-- Top 3 with Highest Loss Rate -->
+    <div class="section-header">
+        <h2>Top 3 with Highest Loss Rate</h2>
+        <p class="section-subtitle">Opponents they struggle against most (min 5 games)</p>
+    </div>
+    <div class="card">
+        <div class="winrates-list" id="top-opponents-lost">
+            <div class="loading">Loading opponents...</div>
+        </div>
+    </div>
+    
+    <!-- Top 3 with Highest Win Rate -->
+    <div class="section-header">
+        <h2>Top 3 with Highest Win Rate</h2>
+        <p class="section-subtitle">Opponents they dominate most (min 5 games)</p>
+    </div>
+    <div class="card">
+        <div class="winrates-list" id="top-opponents-won">
+            <div class="loading">Loading opponents...</div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .profile-container {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    .profile-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding: 1.25rem;
+        background-color: var(--gm-800);
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
+    }
+    
+    .profile-info {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+    
+    .avatar-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--dg-900) 0%, var(--dg-700) 100%);
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        font-weight: bold;
+    }
+    
+    .profile-username {
+        margin: 0;
+        font-size: 1.5rem;
+        color: var(--text);
+    }
+    
+    .profile-role {
+        margin: 0.25rem 0 0 0;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+    }
+    
+    .section-header {
+        margin: 2rem 0 0.75rem 0;
+    }
+    
+    .section-header h2 {
+        margin: 0;
+        color: var(--text);
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+    
+    .section-subtitle {
+        margin: 0.25rem 0 0 0;
+        color: var(--text-muted);
+        font-size: 0.875rem;
+        font-weight: 400;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        max-width: 600px;
+    }
+    
+    .stats-grid .stat-card {
+        background-color: var(--gm-700);
+        padding: 0.75rem;
+        border-radius: 6px;
+        border-left: 2px solid var(--dg-500);
+        aspect-ratio: 1 / 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+    }
+    
+    .stat-icon {
+        font-size: 1.5rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .stats-grid .stat-value {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: var(--text);
+        line-height: 1;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        margin-bottom: 0.25rem;
+    }
+    
+    .stats-grid .stat-label {
+        color: var(--dg-500);
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+        line-height: 1.1;
+        text-shadow: 0 0 8px rgba(64, 145, 108, 0.4);
+    }
+    
+    .card {
+        background-color: var(--gm-800);
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: var(--shadow-sm);
+        margin-bottom: 1.5rem;
+    }
+    
+    .winrates-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .loading {
+        text-align: center;
+        color: var(--text-muted);
+        padding: 1rem;
+        font-style: italic;
+    }
+</style>
+
+<script>
+    function escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+    
+    // Load player stats for the public profile
+    const playerUsername = '{{ player_username }}';
+
+    async function loadPublicPlayerStats() {
+        try {
+            // Load player stats by username
+            const response = await fetch(`/badminton/api/players/${encodeURIComponent(playerUsername)}/public-stats`);
+            if (!response.ok) {
+                throw new Error('Failed to load player stats');
+            }
+            
+            const stats = await response.json();
+            
+            // Update avatar
+            document.getElementById('player-avatar').textContent = stats.username[0].toUpperCase();
+            document.getElementById('player-username').textContent = stats.username;
+            document.getElementById('player-role').textContent = stats.role.charAt(0).toUpperCase() + stats.role.slice(1);
+            
+            // Update stat cards
+            document.getElementById('mmr-value').textContent = Math.round(stats.mmr);
+            document.getElementById('matches-value').textContent = stats.total_matches;
+            document.getElementById('winrate-value').textContent = stats.win_rate.toFixed(1) + '%';
+            document.getElementById('earnings-value').textContent = '$' + stats.total_earnings.toFixed(2);
+            
+            // Load partners
+            await loadPartners(stats.user_id);
+            
+            // Load opponents
+            await loadOpponents(stats.user_id);
+            
+        } catch (error) {
+            console.error('Failed to load player stats:', error);
+        }
+    }
+
+    async function loadPartners(userId) {
+        try {
+            const response = await fetch(`/badminton/api/players/${userId}/partners`);
+            if (!response.ok) throw new Error('Failed to load partners');
+            
+            const partners = await response.json();
+            const container = document.getElementById('top-partners-winrate');
+            
+            if (partners.length === 0) {
+                container.innerHTML = '<div class="loading">No partners with 5+ games yet</div>';
+                return;
+            }
+            
+            // Render with win-rate-bar structure
+            container.innerHTML = partners.map(p => {
+                const winPercent = Math.round(p.win_rate);
+                const lossPercent = 100 - winPercent;
+                
+                return `
+                    <div class="win-rate-row">
+                        <div class="name">${escapeHtml(p.partner)}</div>
+                        <div class="games">${p.total_games}</div>
+                        <div class="bar-container">
+                            <div class="win-rate-bar">
+                                <div class="win-rate-bar-segment win-segment" style="width: ${winPercent}%"></div>
+                                <div class="win-rate-bar-segment loss-segment" style="width: ${lossPercent}%"></div>
+                                <div class="win-rate-label">${winPercent}%</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+        } catch (error) {
+            console.error('Failed to load partners:', error);
+            document.getElementById('top-partners-winrate').innerHTML = '<div class="loading">Error loading partners</div>';
+        }
+    }
+
+    async function loadOpponents(userId) {
+        try {
+            const response = await fetch(`/badminton/api/players/${userId}/opponents`);
+            if (!response.ok) throw new Error('Failed to load opponents');
+            
+            const data = await response.json();
+            
+            // Lost against
+            const lostContainer = document.getElementById('top-opponents-lost');
+            if (data.lost_against && data.lost_against.length > 0) {
+                lostContainer.innerHTML = data.lost_against.map(o => {
+                    const lossPercent = Math.round(o.loss_rate);
+                    const winPercent = 100 - lossPercent;
+                    
+                    return `
+                        <div class="win-rate-row">
+                            <div class="name">${escapeHtml(o.opponent)}</div>
+                            <div class="games">${o.total_games}</div>
+                            <div class="bar-container">
+                                <div class="win-rate-bar">
+                                    <div class="win-rate-bar-segment win-segment" style="width: ${winPercent}%"></div>
+                                    <div class="win-rate-bar-segment loss-segment" style="width: ${lossPercent}%"></div>
+                                    <div class="win-rate-label">${lossPercent}% loss</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                lostContainer.innerHTML = '<div class="loading">No opponents with 5+ games yet</div>';
+            }
+            
+            // Won against
+            const wonContainer = document.getElementById('top-opponents-won');
+            if (data.won_against && data.won_against.length > 0) {
+                wonContainer.innerHTML = data.won_against.map(o => {
+                    const winPercent = Math.round(o.win_rate);
+                    const lossPercent = 100 - winPercent;
+                    
+                    return `
+                        <div class="win-rate-row">
+                            <div class="name">${escapeHtml(o.opponent)}</div>
+                            <div class="games">${o.total_games}</div>
+                            <div class="bar-container">
+                                <div class="win-rate-bar">
+                                    <div class="win-rate-bar-segment win-segment" style="width: ${winPercent}%"></div>
+                                    <div class="win-rate-bar-segment loss-segment" style="width: ${lossPercent}%"></div>
+                                    <div class="win-rate-label">${winPercent}% win</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                wonContainer.innerHTML = '<div class="loading">No opponents with 5+ games yet</div>';
+            }
+            
+        } catch (error) {
+            console.error('Failed to load opponents:', error);
+            document.getElementById('top-opponents-lost').innerHTML = '<div class="loading">Error loading opponents</div>';
+            document.getElementById('top-opponents-won').innerHTML = '<div class="loading">Error loading opponents</div>';
+        }
+    }
+
+    // Load stats on page load
+    loadPublicPlayerStats();
+</script>
+{% endblock %}

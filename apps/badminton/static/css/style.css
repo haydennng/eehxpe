@@ -27,6 +27,13 @@
     --team-c-soft: rgba(168, 85, 247, 0.25);
     --team-d-soft: rgba(6, 182, 212, 0.25);
     
+    /* Court Colors */
+    --court-1: #E76F51; /* Red */
+    --court-2: #4A90E2; /* Blue */
+    --court-3: #A855F7; /* Purple */
+    --court-4: #14B8A6; /* Teal */
+    --court-5: #22C55E; /* Green */
+    
     /* Shadows */
     --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
     --shadow-md: 0 4px 6px rgba(0,0,0,0.3);
@@ -125,19 +132,20 @@ a:hover {
     overflow-x: hidden;
 }
 
-/* Matchups page container - full viewport, no scroll on desktop */
+/* Matchups page container - allow vertical scroll, prevent horizontal */
 body[data-page="matchups"] {
-    overflow: hidden;
-    height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    min-height: 100vh;
 }
 
 body[data-page="matchups"] .container {
     padding: 1rem 2rem;
     max-width: 100%;
-    height: calc(100vh - 60px); /* Subtract navbar height */
+    min-height: calc(100vh - 60px); /* Subtract navbar height */
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-x: hidden;
 }
 
 /* Allow vertical scroll on mobile */
@@ -1542,14 +1550,21 @@ body[data-page="matchups"] .container {
 /* Court Row - Horizontal layout with VS icon in center */
 .court-row {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 0.75rem;
     position: relative;
 }
 
+/* Team wrapper to hold stats + team box */
+.team-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
 /* Team containers */
 .court-row .team {
-    flex: 1;
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -1588,6 +1603,16 @@ body[data-page="matchups"] .container {
     flex-shrink: 0;
 }
 
+/* Stats container outside team box */
+.team-stats-container {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;;
+    color: rgba(230, 240, 234, 0.70);
+    background-color: transparent;
+}
+
 /* Team names container */
 .team-names {
     flex: 1;
@@ -1601,12 +1626,27 @@ body[data-page="matchups"] .container {
     min-height: 1.5rem;
 }
 
-/* Win probability percentage next to team names */
-.team-names .win-prob {
-    color: rgba(230, 240, 234, 0.70);
-    font-size: 0.9em;
-    font-weight: 500;
-    margin-left: 0.35rem;
+/* Win probability percentage */
+.team-stats-container .win-prob {
+    font-size: 1em;
+    font-weight: 600;
+    display: inline-block;
+    white-space: nowrap;
+}
+
+/* MMR change styling */
+.team-stats-container .mmr-change {
+    font-size: 1em;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.team-stats-container .mmr-win {
+    color: var(--ok);
+}
+
+.team-stats-container .mmr-loss {
+    color: var(--danger);
 }
 
 /* Score inputs positioned near center */
@@ -1642,9 +1682,437 @@ body[data-page="matchups"] .container {
     height: 32px;
     flex-shrink: 0;
     opacity: 0.9;
+    align-self: flex-end;
+    margin-bottom: 0.5rem;
 }
 
-/* Bet row (below all courts) */
+/* ==================== On Deck Recommendations Styles ==================== */
+.on-deck-section {
+    background-color: var(--gm-800);
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    border: 2px solid var(--warn);
+}
+
+.on-deck-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.on-deck-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+    margin-right: auto;
+}
+
+/* Minimized On Deck state */
+.on-deck-section.minimized .on-deck-container,
+.on-deck-section.minimized .on-deck-footer,
+.on-deck-section.minimized .on-deck-actions {
+    display: none;
+}
+
+.on-deck-section.minimized .on-deck-header {
+    margin-bottom: 0;
+}
+
+.btn-on-deck-minimize {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s ease, transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.btn-on-deck-minimize:hover {
+    color: var(--text);
+}
+
+.on-deck-section.minimized .btn-on-deck-minimize {
+    transform: rotate(180deg);
+}
+
+.on-deck-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.on-deck-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.on-deck-empty {
+    text-align: center;
+    padding: 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.on-deck-card {
+    background-color: var(--gm-700);
+    border: 2px solid var(--gm-600);
+    border-radius: 4px;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    transition: border-color 0.2s ease;
+}
+
+.on-deck-card:hover {
+    border-color: var(--gm-500);
+}
+
+.on-deck-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.on-deck-court-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.btn-on-deck-cycle {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    transition: color 0.2s ease, transform 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+}
+
+.btn-on-deck-cycle:hover {
+    color: var(--text);
+    transform: rotate(180deg);
+}
+
+.btn-on-deck-assign {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.75rem;
+    background: #4A90E2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.btn-on-deck-assign:hover {
+    background: #357ABD;
+}
+
+#btn-assign-all-courts {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+    background: #4A90E2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+#btn-assign-all-courts:hover {
+    background: #357ABD;
+}
+
+.on-deck-matchup {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background-color: var(--gm-750);
+    border-radius: 4px;
+}
+
+.on-deck-team-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.on-deck-stats {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    color: rgba(230, 240, 234, 0.70);
+    background-color: transparent;
+}
+
+.on-deck-team {
+    display: flex;
+    align-items: center;
+    padding: 0.3rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.on-deck-team-a {
+    background-color: rgba(231, 111, 81, 0.15);
+    border: 2px solid var(--team-a);
+}
+
+.on-deck-team-b {
+    background-color: rgba(42, 157, 143, 0.15);
+    border: 2px solid var(--team-b);
+}
+
+.on-deck-player {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.on-deck-vs {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.on-deck-stats .on-deck-win-prob {
+    font-size: 1em;
+    font-weight: 600;
+    color: var(--text-muted);
+    display: inline-block;
+    white-space: nowrap;
+}
+
+.on-deck-stats .mmr-change {
+    font-size: 1em;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.on-deck-stats .mmr-win {
+    color: var(--ok);
+}
+
+.on-deck-stats .mmr-loss {
+    color: var(--danger);
+}
+
+.on-deck-court-info {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 0.2rem;
+    background-color: var(--gm-750);
+    border-radius: 4px;
+}
+
+.on-deck-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.75rem;
+    margin-top: 0.5rem;
+    border-top: 1px solid var(--gm-600);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .on-deck-section {
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+    }
+    
+    .on-deck-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .on-deck-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+    
+    .on-deck-matchup {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .on-deck-vs {
+        transform: rotate(90deg);
+    }
+}
+
+/* Court Section - Individual court container for multi-court mode */
+.court-section {
+    background-color: var(--gm-700);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
+
+/* Compact layout when 3+ courts are visible */
+@media (min-width: 769px) {
+    #courts-container:has(.court-section:nth-child(3):not([style*="display: none"])) .court-section {
+        padding: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    #courts-container:has(.court-section:nth-child(3):not([style*="display: none"])) .court-header {
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.4rem;
+    }
+    
+    #courts-container:has(.court-section:nth-child(3):not([style*="display: none"])) .court-bet-row {
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+}
+
+.court-section[data-state="active"] {
+    border-color: var(--dg-500);
+}
+
+.court-section[data-state="recorded"] {
+    border-color: var(--ok);
+    background-color: rgba(42, 157, 143, 0.1);
+}
+
+/* Court header with label and status */
+.court-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--gm-800);
+}
+
+.court-label {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.court-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.court-status {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--ok);
+}
+
+/* Per-court cycle button */
+.btn-court-cycle {
+    appearance: none;
+    background-color: var(--dg-700);
+    border: 1px solid var(--dg-500);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 0.35rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-court-cycle:hover {
+    background-color: var(--dg-500);
+    border-color: var(--dg-700);
+    transform: scale(1.05);
+}
+
+.btn-court-cycle:active {
+    transform: scale(0.95);
+}
+
+.btn-court-cycle:focus-visible {
+    outline: 2px solid var(--dg-500);
+    outline-offset: 2px;
+}
+
+.btn-court-cycle svg {
+    display: block;
+}
+
+/* Per-court clear button */
+.btn-court-clear {
+    appearance: none;
+    background-color: transparent;
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    border-radius: 4px;
+    padding: 0.35rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-court-clear:hover {
+    background-color: var(--warn);
+    color: var(--gm-900);
+    transform: scale(1.05);
+}
+
+.btn-court-clear:active {
+    transform: scale(0.95);
+}
+
+.btn-court-clear:focus-visible {
+    outline: 2px solid var(--warn);
+    outline-offset: 2px;
+}
+
+.btn-court-clear svg {
+    display: block;
+}
+
+/* Court bet row - per-court bet selection */
+.court-bet-row {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+/* Court actions - buttons for record and clear */
+.court-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.record-court-btn,
+.clear-court-btn {
+    flex: 1;
+}
+
+/* Bet row (below all courts) - legacy single court */
 #bet-row,
 .bet-row {
     width: 100%;
@@ -1755,7 +2223,8 @@ body[data-page="matchups"] .container {
 /* ==================== Player Toggle Buttons ==================== */
 .player-toggle-grid {
     display: grid;
-    gap: 1rem;
+    gap: 1.5rem;
+    padding: 0 1rem;
 }
 
 .player-toggle-grid--3col {
@@ -1769,7 +2238,8 @@ body[data-page="matchups"] .container {
 /* Reduce gap on mobile */
 @media (max-width: 768px) {
     .player-toggle-grid {
-        gap: 0.5rem;
+        gap: 0.75rem;
+        padding: 0 0.5rem;
     }
 }
 
@@ -1783,14 +2253,14 @@ body[data-page="matchups"] .container {
 /* Name button (85% width, left-rounded) */
 .player-name-btn {
     flex: 0 0 85%;
-    padding: 0.65rem 0.85rem;
+    padding: 0.5rem 0.65rem;
     background-color: var(--gm-700);
     color: var(--text);
     border: 2px solid var(--gm-700);
     border-radius: 6px 0 0 6px;
     border-right: none;
     cursor: pointer;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     font-weight: 500;
     transition: all 0.2s;
     text-align: center;
@@ -1952,23 +2422,93 @@ body[data-page="matchups"] .container {
     content: '2';
 }
 
+.player-name-btn.court-3::before,
+.player-item.court-3::before {
+    content: '3';
+}
+
+.player-name-btn.court-4::before,
+.player-item.court-4::before {
+    content: '4';
+}
+
+.player-name-btn.court-5::before,
+.player-item.court-5::before {
+    content: '5';
+}
+
 /* Add left padding when court number is shown to prevent text overlap */
 .player-name-btn.court-1,
-.player-name-btn.court-2 {
+.player-name-btn.court-2,
+.player-name-btn.court-3,
+.player-name-btn.court-4,
+.player-name-btn.court-5 {
     padding-left: 2.5rem;
+}
+
+/* Court color overrides - all players on same court get same color */
+/* High specificity to override no-bet styling */
+.player-item.is-no-bet .player-name-btn.court-1.selected,
+.player-name-btn.court-1.selected {
+    background-color: var(--court-1) !important;
+    border-color: var(--court-1) !important;
+    color: #fff !important;
+}
+
+.player-item.is-no-bet .player-name-btn.court-2.selected,
+.player-name-btn.court-2.selected {
+    background-color: var(--court-2) !important;
+    border-color: var(--court-2) !important;
+    color: #fff !important;
+}
+
+.player-item.is-no-bet .player-name-btn.court-3.selected,
+.player-name-btn.court-3.selected {
+    background-color: var(--court-3) !important;
+    border-color: var(--court-3) !important;
+    color: #fff !important;
+}
+
+.player-item.is-no-bet .player-name-btn.court-4.selected,
+.player-name-btn.court-4.selected {
+    background-color: var(--court-4) !important;
+    border-color: var(--court-4) !important;
+    color: #fff !important;
+}
+
+.player-item.is-no-bet .player-name-btn.court-5.selected,
+.player-name-btn.court-5.selected {
+    background-color: var(--court-5) !important;
+    border-color: var(--court-5) !important;
+    color: #fff !important;
+}
+
+/* Partnership indicators - different colored court numbers for each team */
+/* Team A gets lighter/brighter court numbers */
+.player-name-btn.selected.team-a::before {
+    color: rgba(255, 255, 255, 0.95);
+    opacity: 0.9;
+    font-weight: 900;
+}
+
+/* Team B gets darker/dimmer court numbers */
+.player-name-btn.selected.team-b::before {
+    color: rgba(0, 0, 0, 0.5);
+    opacity: 0.7;
+    font-weight: 700;
 }
 
 /* Activation toggle button (15% width, right-rounded) */
 .player-toggle-btn {
     flex: 0 0 15%;
-    padding: 0.65rem 0.5rem;
+    padding: 0.5rem 0.4rem;
     background-color: #2e7d32;
     color: #fff;
     border: 2px solid #2e7d32;
     border-radius: 0 6px 6px 0;
     border-left: none;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 0.95rem;
     font-weight: 700;
     transition: all 0.2s;
     text-align: center;
@@ -2035,6 +2575,30 @@ body[data-page="matchups"] .container {
         transform: scale(0.95);
         background-color: #1b5e20;
     }
+}
+
+/* No-bet player state (active but doesn't bet money) */
+.player-item.is-no-bet .player-name-btn {
+    background-color: var(--gm-700);
+    border-color: var(--warn);
+    color: var(--text);
+}
+
+.player-item.is-no-bet .player-name-btn:hover:not(:disabled) {
+    background-color: var(--gm-800);
+    border-color: var(--warn);
+}
+
+.player-item.is-no-bet .player-toggle-btn {
+    background-color: var(--warn);
+    border-color: var(--warn);
+    color: var(--gm-900);
+    font-weight: 600;
+}
+
+.player-item.is-no-bet .player-toggle-btn:hover {
+    background-color: #d4a959;
+    border-color: #d4a959;
 }
 
 /* Inactive player state (visible but disabled) */
@@ -2394,35 +2958,40 @@ body[data-page="matchups"] .container {
 }
 
 /* ==================== Custom Themed Scrollbars ==================== */
-/* Firefox scrollbar styling */
-body[data-page="matchups"],
-.table-scroll {
+/* Firefox scrollbar styling (global) */
+* {
     scrollbar-width: thin;
-    scrollbar-color: var(--dg-700) var(--gm-800);
+    scrollbar-color: var(--dg-700) transparent;
 }
 
-/* WebKit (Chrome/Edge/Safari) scrollbar styling */
-body[data-page="matchups"]::-webkit-scrollbar,
-.table-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+/* WebKit (Chrome/Edge/Safari) scrollbar styling (global) */
+*::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
 }
 
-body[data-page="matchups"]::-webkit-scrollbar-track,
-.table-scroll::-webkit-scrollbar-track {
-    background: var(--gm-800);
+*::-webkit-scrollbar-track {
+    background: transparent;
 }
 
-body[data-page="matchups"]::-webkit-scrollbar-thumb,
-.table-scroll::-webkit-scrollbar-thumb {
+*::-webkit-scrollbar-thumb {
     background-color: var(--dg-700);
     border-radius: 8px;
-    border: 2px solid var(--gm-800);
+    border: 2px solid transparent;
+    background-clip: content-box;
 }
 
-body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
-.table-scroll::-webkit-scrollbar-thumb:hover {
+*::-webkit-scrollbar-thumb:hover {
     background-color: var(--dg-500);
+}
+
+/* Give the page body a visible track so the main scrollbar is grounded */
+body::-webkit-scrollbar-track {
+    background: var(--gm-900);
+}
+
+body {
+    scrollbar-color: var(--dg-700) var(--gm-900);
 }
 
 /* ==================== Earnings Table ==================== */
@@ -3097,24 +3666,7 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
     overflow-x: hidden;
 }
 
-/* Custom scrollbar styling for stats tables */
-.stats-table-scroll::-webkit-scrollbar {
-    width: 8px;
-}
-
-.stats-table-scroll::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-}
-
-.stats-table-scroll::-webkit-scrollbar-thumb {
-    background: var(--dg-500);
-    border-radius: 4px;
-}
-
-.stats-table-scroll::-webkit-scrollbar-thumb:hover {
-    background: var(--dg-700);
-}
+/* Stats table scroll inherits global scrollbar styles */
 
 @media (max-width: 768px) {
     .stats-table-scroll {
@@ -3181,6 +3733,66 @@ body[data-page="matchups"]::-webkit-scrollbar-thumb:hover,
         font-size: 0.7rem;
         padding: 0.25rem 0.4rem;
     }
+}
+
+/* ==================== Logs Tab ==================== */
+.logs-container {
+    padding: 0.5rem;
+    max-height: 500px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.log-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 0.5rem;
+}
+
+.log-group:last-child {
+    border-bottom: none;
+}
+
+.log-entry {
+    font-size: 0.8rem;
+    line-height: 1.4;
+    font-family: monospace;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.log-time {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    font-size: 0.75rem;
+}
+
+.log-msg {
+    color: var(--text);
+}
+
+.log-entry.log-win .log-msg {
+    color: var(--ok);
+}
+
+.log-entry.log-loss .log-msg {
+    color: var(--danger);
+}
+
+.log-entry.log-match .log-msg {
+    font-weight: 600;
+}
+
+.log-pwned {
+    background: linear-gradient(90deg, #2EE6A6 0%, #FF9E57 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
 }
 
 /* ==================== Date Design Component ==================== */
@@ -3938,6 +4550,17 @@ td .date-design {
     letter-spacing: 0.02em;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
     flex-shrink: 0;
+}
+
+.player-link {
+    color: var(--text);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.player-link:hover {
+    color: var(--dg-500);
+    text-decoration: underline;
 }
 
 .win-rate-row .games {

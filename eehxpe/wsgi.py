@@ -30,10 +30,12 @@ sys.path.insert(0, str(project_root / 'apps' / 'badminton'))
 
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from werkzeug.exceptions import NotFound
+from werkzeug.utils import redirect
 
-def not_found_app(environ, start_response):
-    """Default 404 handler for unmapped paths."""
-    return NotFound()(environ, start_response)
+def root_app(environ, start_response):
+    """Redirect all unmatched paths (including /) to the badminton dashboard."""
+    response = redirect('/badminton/dashboard', code=302)
+    return response(environ, start_response)
 
 # Import and initialize badminton app
 badminton_app = None
@@ -53,7 +55,7 @@ if badminton_app:
     print(f"Mounted badminton app at /badminton")
 
 # Create the dispatcher
-application = DispatcherMiddleware(not_found_app, mounts)
+application = DispatcherMiddleware(root_app, mounts)
 
 if __name__ == "__main__":
     # For local testing
