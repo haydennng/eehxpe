@@ -72,15 +72,7 @@ def verify_password(username, password):
 # Security headers and CORS
 @app.after_request
 def after_request(response):
-    # CORS headers - restricted for production
-    # Only enable if accessing from different domain, otherwise remove for security
-    origin = request.headers.get('Origin')
-    if origin:
-        # Allow same-origin requests (PWA and direct access)
-        response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, PATCH, OPTIONS'
+    # No CORS headers needed - app is served same-origin via Cloudflare
     
     # Cache control headers - prevent aggressive browser caching during development
     # For HTML pages and API responses, disable caching
@@ -446,6 +438,7 @@ def login():
 
 
 @app.route('/api/register', methods=['POST'])
+@admin_required
 def register():
     """Register a new user account."""
     data = request.json if request.is_json else request.form
@@ -492,106 +485,8 @@ def auth_status():
     return jsonify({'authenticated': False})
 
 
-@app.route('/db-test')
-def db_test():
-    """Database test endpoint - NO AUTH required."""
-    try:
-        from models import User
-        with session_scope() as session:
-            user_count = session.query(User).count()
-            users = session.query(User).limit(5).all()
-            user_list = [f"{u.username} (MMR: {u.mmr})" for u in users]
-        
-        return f'''<!DOCTYPE html>
-<html><head><title>DB Test</title></head>
-<body style="font-family: Arial; padding: 40px;">
-<h1>✅ Database Integration Working!</h1>
-<p><strong>Total users in database:</strong> {user_count}</p>
-<p><strong>Sample users:</strong></p>
-<ul>{"".join(f"<li>{u}</li>" for u in user_list)}</ul>
-<p><a href="/badminton/login">Try Login Page</a></p>
-</body></html>'''
-    except Exception as e:
-        return f'''<!DOCTYPE html>
-<html><head><title>DB Test Error</title></head>
-<body style="font-family: Arial; padding: 40px;">
-<h1>❌ Database Error</h1>
-<pre>{e}</pre>
-</body></html>'''
 
 
-@app.route('/auth-test')
-def auth_test():
-    """Test page to check authentication status."""
-    if current_user.is_authenticated:
-        return f'''<!DOCTYPE html>
-<html>
-<head>
-    <title>Auth Test</title>
-    <style>
-        body {{ font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }}
-        .status {{ background: #d4edda; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
-        .info {{ background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 10px 0; }}
-        button {{ background: #dc3545; color: white; border: none; padding: 10px 20px; 
-                 border-radius: 5px; cursor: pointer; font-size: 16px; }}
-        button:hover {{ background: #c82333; }}
-        a {{ display: inline-block; margin: 10px 10px 10px 0; padding: 10px 20px; 
-            background: #007bff; color: white; text-decoration: none; border-radius: 5px; }}
-        a:hover {{ background: #0056b3; }}
-    </style>
-</head>
-<body>
-    <h1>Authentication Test</h1>
-    <div class="status">
-        <h2>✅ You are logged in!</h2>
-        <div class="info">
-            <strong>Username:</strong> {current_user.username}<br>
-            <strong>Role:</strong> {current_user.role.value}<br>
-            <strong>MMR:</strong> {current_user.mmr}<br>
-            <strong>User ID:</strong> {current_user.id}
-        </div>
-    </div>
-    
-    <a href="/badminton/">Go to Dashboard</a>
-    <a href="/badminton/profile">View Profile</a>
-    <br><br>
-    
-    <button onclick="logout()">Logout</button>
-    
-    <script>
-        async function logout() {{
-            const response = await fetch('/badminton/api/logout', {{
-                method: 'POST'
-            }});
-            if (response.ok) {{
-                window.location = '/badminton/login';
-            }}
-        }}
-    </script>
-</body>
-</html>'''
-    else:
-        return f'''<!DOCTYPE html>
-<html>
-<head>
-    <title>Auth Test</title>
-    <style>
-        body {{ font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }}
-        .status {{ background: #f8d7da; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
-        a {{ display: inline-block; margin: 10px 0; padding: 10px 20px; 
-            background: #007bff; color: white; text-decoration: none; border-radius: 5px; }}
-        a:hover {{ background: #0056b3; }}
-    </style>
-</head>
-<body>
-    <h1>Authentication Test</h1>
-    <div class="status">
-        <h2>❌ You are NOT logged in</h2>
-        <p>Please login to access the application.</p>
-    </div>
-    <a href="/badminton/login">Go to Login</a>
-</body>
-</html>'''
 
 
 # ==================== Profile and Stats Routes ====================
@@ -982,6 +877,7 @@ def get_user_stats(user_id):
 
 # Session endpoints
 @app.route('/api/session', methods=['GET'])
+@login_required
 def get_session():
     """Get current session status."""
     return jsonify({
@@ -994,6 +890,7 @@ def get_session():
 
 # Player endpoints
 @app.route('/api/players', methods=['GET'])
+@login_required
 def get_players():
     """
     Get list of all players with MMR from database.
@@ -1031,6 +928,7 @@ def get_players():
 
 
 @app.route('/api/players', methods=['POST'])
+@login_required
 def add_player():
     """Add a new player."""
     data = request.json
@@ -1087,6 +985,7 @@ def delete_player(name):
 
 
 @app.route('/api/players/<name>/active', methods=['PATCH'])
+@login_required
 def toggle_player_active(name):
     """Toggle a player's active status and no-bet mode."""
     player = get_player_by_name(name)
@@ -1111,6 +1010,7 @@ def toggle_player_active(name):
 
 
 @app.route('/api/players/<name>/deactivated', methods=['PATCH'])
+@login_required
 def toggle_player_deactivated(name):
     """Toggle a player's deactivated status (hidden from main view)."""
     player = get_player_by_name(name)
@@ -1179,78 +1079,58 @@ def get_matches():
 
 
 @app.route('/api/matches', methods=['POST'])
+@login_required
 def record_match():
     """Record a new match result."""
-    print("\n=== POST /api/matches called ===")
-    print(f"Request data: {request.get_data()}")
     data = request.json
-    print(f"Parsed JSON: {data}")
-    
+
     # Extract and validate required fields
-    print("Extracting fields...")
     team1 = data.get('team1')
     team2 = data.get('team2')
     team1_score = data.get('team1_score')
     team2_score = data.get('team2_score')
     game_value = data.get('game_value')
     player_no_bet_status = data.get('player_no_bet_status', {})
-    print(f"Fields: team1={team1}, team2={team2}, scores={team1_score}/{team2_score}, value={game_value}")
-    print(f"No-bet status: {player_no_bet_status}")
-    
+
     # Validate teams
-    print("Validating teams...")
     if not team1 or not team2:
-        print("ERROR: Teams missing")
         return jsonify({'error': 'Both teams are required'}), 400
-    
+
     if not isinstance(team1, list) or not isinstance(team2, list):
         return jsonify({'error': 'Teams must be arrays'}), 400
-    
+
     if len(team1) != 2 or len(team2) != 2:
         return jsonify({'error': 'Each team must have exactly 2 players'}), 400
-    
+
     # Validate all players are distinct
     all_players = team1 + team2
     if len(set(all_players)) != 4:
         return jsonify({'error': 'All 4 players must be distinct'}), 400
-    
+
     # Validate scores
-    print("Validating scores...")
     try:
         team1_score = int(team1_score)
         team2_score = int(team2_score)
         if team1_score < 0 or team2_score < 0:
-            print("ERROR: Negative scores")
             return jsonify({'error': 'Scores must be non-negative'}), 400
-        print(f"Scores OK: {team1_score} - {team2_score}")
-    except (ValueError, TypeError) as e:
-        print(f"ERROR: Invalid scores - {e}")
+    except (ValueError, TypeError):
         return jsonify({'error': 'Invalid scores'}), 400
-    
+
     # Validate game value
-    print("Validating game value...")
     try:
         game_value = int(game_value)
         if game_value < 0 or game_value > 5:
-            print("ERROR: Game value out of range")
             return jsonify({'error': 'Game value must be between 0 and 5'}), 400
-        print(f"Game value OK: ${game_value}")
-    except (ValueError, TypeError) as e:
-        print(f"ERROR: Invalid game value - {e}")
+    except (ValueError, TypeError):
         return jsonify({'error': 'Invalid game value'}), 400
-    
+
     # Assign game number and increment
-    print("Assigning game number...")
     with file_lock:
         game_number = session_state['next_game_number']
-        print(f"Assigned game number: {game_number}")
         session_state['next_game_number'] += 1
-        print("Saving session...")
         save_session()
-        print("Session saved")
-    
+
     # Create match record
-    print("Creating match record...")
     match_data = {
         'game_number': game_number,
         'team1': team1,
@@ -1261,49 +1141,30 @@ def record_match():
         'winner': 'team1' if team1_score > team2_score else 'team2',
         'player_no_bet_status': player_no_bet_status
     }
-    
+
     # Include session_id if provided (for adding to specific session)
     if 'session_id' in data:
         match_data['session_id'] = data['session_id']
-        print(f"Match data with session_id: {match_data}")
-    else:
-        print(f"Match data (will use today's session): {match_data}")
-    
-    print("Saving match to storage...")
+
     match_id = storage.save_match(match_data)
-    print(f"Match saved with ID: {match_id}")
-    
+
     # Update MMR after match is saved
-    print("Updating MMR for match...")
     try:
         from mmr_database import update_mmr_for_match
-        
-        # Extract numeric ID from match_id string (format: "match_123")
         numeric_match_id = int(match_id.replace('match_', ''))
-        
-        # Calculate and update MMR for all players in this match
-        rating_changes, mmr_change = update_mmr_for_match(numeric_match_id, k_factor=24)
-        
-        print(f"MMR updated successfully. Changes: {rating_changes}")
-        print(f"MMR change value: {mmr_change}")
+        update_mmr_for_match(numeric_match_id, k_factor=24)
     except Exception as e:
         import traceback
-        print(f"Warning: Failed to update MMR: {e}")
         traceback.print_exc()
         # Don't fail the match save if MMR update fails
-    
-    # Get the saved match to return
-    print("Loading all matches...")
+
     all_matches = storage.get_all_matches()
-    print(f"Total matches: {len(all_matches)}")
     saved_match = next((m for m in all_matches if m.get('match_id') == match_id), None)
-    print(f"Returning match: {saved_match}")
-    
-    print("=== Returning response ===\n")
     return jsonify(saved_match)
 
 
 @app.route('/api/matches/<match_id>', methods=['PATCH'])
+@login_required
 def update_match(match_id):
     """Update an existing match."""
     data = request.json
@@ -1461,6 +1322,7 @@ def get_sessions():
 
 
 @app.route('/api/sessions/current', methods=['GET'])
+@login_required
 def api_get_current_session():
     """Get or create the current (today's) session."""
     session = storage.get_current_session()
@@ -1483,6 +1345,7 @@ def api_get_current_session():
 
 
 @app.route('/api/sessions/<session_id>', methods=['GET'])
+@login_required
 def get_session_detail(session_id):
     """Get detailed information about a specific session."""
     session = storage.get_session(session_id)
@@ -1509,6 +1372,7 @@ def get_session_detail(session_id):
 
 
 @app.route('/api/sessions', methods=['POST'])
+@login_required
 def create_session():
     """Create or get a session for a specific date."""
     data = request.json or {}
@@ -1661,6 +1525,7 @@ def get_stats():
 
 
 @app.route('/api/earnings', methods=['GET'])
+@login_required
 def get_earnings():
     """Get player earnings/losses for all players."""
     earnings_data = storage.get_all_player_earnings()
@@ -1702,6 +1567,7 @@ def get_monthly_earnings():
 
 
 @app.route('/api/mmr/monthly', methods=['GET'])
+@login_required
 def get_monthly_mmr_changes():
     """Calculate MMR changes for a specific month by processing matches chronologically.
     
@@ -1805,6 +1671,7 @@ def get_monthly_mmr_changes():
 
 
 @app.route('/api/partnerships', methods=['GET'])
+@login_required
 def get_partnerships():
     """
     Get partnership statistics across all matches.
@@ -1905,6 +1772,7 @@ def get_partnerships():
 
 
 @app.route('/api/current-session/player/<player_name>/matches', methods=['GET'])
+@login_required
 def get_player_session_matches(player_name):
     """Get all matches for a specific player in the current session."""
     from urllib.parse import unquote
@@ -2019,6 +1887,7 @@ def get_session_earnings(session_id):
 
 
 @app.route('/api/sessions/<session_id>/stats', methods=['GET'])
+@login_required
 def get_session_stats(session_id):
     """Get player and partnership win rates for a specific session."""
     # Verify session exists
@@ -2128,6 +1997,7 @@ def get_session_stats(session_id):
 
 
 @app.route('/api/recommendations', methods=['GET'])
+@login_required
 def get_recommendations():
     """Get recommended matchups based on current session partnership history.
     
@@ -2168,13 +2038,14 @@ def get_recommendations():
     teammate_counts = defaultdict(Counter)  # Track who each player has been teammates with
     opponent_counts = defaultdict(Counter)  # Track who each player has played against
     
-    # Track who played in the last game (to prioritize those who sat out)
+    # Track who played in the last round (to prioritize those who sat out)
+    # For multi-court, collect from the last num_courts matches (one per court per round)
+    _num_courts_for_last_round = max(1, len(all_active_players) // 4)
     last_game_players = set()
     if session_matches:
-        last_match = session_matches[-1]  # Get the most recent match
-        last_team1 = last_match.get('team1', [])
-        last_team2 = last_match.get('team2', [])
-        last_game_players = set(last_team1 + last_team2)
+        last_round_matches = session_matches[-_num_courts_for_last_round:]
+        for _m in last_round_matches:
+            last_game_players.update(_m.get('team1', []) + _m.get('team2', []))
     
     for match in session_matches:
         team1 = match.get('team1', [])
@@ -2271,30 +2142,33 @@ def get_recommendations():
             return f"×{count}"
     
     def calculate_sitout_penalty(players_in_matchup):
-        """Calculate penalty for players sitting out >1 round.
-        
-        Priority 1 (HIGHEST): Players not currently playing AND sat out last game
-        These players MUST be included in recommendations to avoid sitting 2+ rounds.
+        """Calculate penalty for players sitting out.
+
+        When a game is in progress (currently_playing_players is set):
+          - Any player NOT on court right now MUST be in the next suggestion.
+          - This ensures everyone currently sitting out gets included.
+
+        Between games (no one on court):
+          - Fall back to last recorded match: anyone who sat out that game
+            must be included in the next suggestion.
         """
         playing_players = set(players_in_matchup)
         sitting_players = set(all_active_players) - playing_players
-        
+
         penalty = 0
         for player in sitting_players:
-            # Check if player is sitting for >1 round:
-            # - Not in this matchup (would be sitting)
-            # - Not currently on any court (already sitting this round)
-            # - Was not in last game (sat out last round)
-            if player not in currently_playing_players and player not in last_game_players:
-                # MASSIVE penalty - this player would be sitting 2+ rounds in a row
-                penalty += 10000  # Must include these players
-            elif player not in last_game_players:
-                # HEAVY penalty if player sat out the last game (would be sitting 2 games in a row)
-                penalty += 1000
-        
-        # Also add small penalty for each player sitting (but much less than consecutive)
+            if currently_playing_players:
+                # Game in progress: penalise leaving out anyone currently off court
+                if player not in currently_playing_players:
+                    penalty += 10000
+            else:
+                # Between games: penalise leaving out anyone who sat out last game
+                if player not in last_game_players:
+                    penalty += 10000
+
+        # Small base penalty per sitting player to prefer fewer sit-outs
         penalty += len(sitting_players) * 10
-        
+
         return penalty
     
     def calculate_john_balance_penalty(players_in_matchup):
@@ -2424,7 +2298,12 @@ def get_recommendations():
         
         if not all_matchups:
             return None
-        
+
+        # First game: no history, return a random matchup
+        if not session_matches:
+            random.shuffle(all_matchups)
+            return all_matchups[0]
+
         # Sort by score and return best
         all_matchups.sort(key=lambda x: x['score'])
         return all_matchups[0]
@@ -2614,11 +2493,35 @@ def get_recommendations():
                     'count_b': count_b
                 })
     
-    all_matchups_for_alternatives.sort(key=lambda x: x['score'])
-    
-    # Return top 10 alternatives for single-court
+    if not session_matches:
+        # First game: no history, randomize alternatives
+        random.shuffle(all_matchups_for_alternatives)
+    else:
+        all_matchups_for_alternatives.sort(key=lambda x: x['score'])
+
+    # Deduplicate by 4-player group: keep only the best-scoring partition per group.
+    # This means cycling shows different PLAYER combinations, not just different team splits
+    # of the same 4 players (the cycle-single-court button handles that separately).
+    seen_groups = {}
+    for m in all_matchups_for_alternatives:
+        group_key = frozenset(m['team_a'] + m['team_b'])
+        if group_key not in seen_groups:
+            seen_groups[group_key] = m  # first occurrence is best (list is sorted)
+
+    # Only include groups that achieve the minimum sit-out penalty.
+    # This ensures mandatory sit-out players are respected across all suggestions.
+    deduped = list(seen_groups.values())
+    if deduped:
+        min_sitout = min(m['score'][0] for m in deduped)
+        valid = [m for m in deduped if m['score'][0] == min_sitout]
+        valid.sort(key=lambda x: x['score'])
+    else:
+        valid = []
+
+    # Return all valid groups (dynamically sized — e.g. 4 when 3 players are mandatory)
+    # capped at 10 to keep the UI manageable when many combinations are equally valid.
     recommendations = []
-    for matchup in all_matchups_for_alternatives[:10]:
+    for matchup in valid[:10]:
         team_a = matchup['team_a']
         team_b = matchup['team_b']
         count_a = matchup['count_a']
@@ -2640,11 +2543,20 @@ def get_recommendations():
         'explanation': f"{best_matchup['team_a'][0]}/{best_matchup['team_a'][1]} {format_count(best_matchup['count_a'])} vs {best_matchup['team_b'][0]}/{best_matchup['team_b'][1]} {format_count(best_matchup['count_b'])}",
         'player_ids': player_ids,
         'recommendations': recommendations,
-        'current_index': 0
+        'current_index': 0,
+        '_debug': {
+            'all_active_players': all_active_players,
+            'session_match_count': len(session_matches),
+            'last_game_players': sorted(list(last_game_players)),
+            'currently_playing_players': sorted(list(currently_playing_players)),
+            'num_courts_for_last_round': _num_courts_for_last_round,
+            'best_matchup_score': list(best_matchup['score'][:7]),
+        }
     })
 
 
 @app.route('/api/recommendations/court', methods=['GET'])
+@login_required
 def get_court_recommendation():
     """Get a single court recommendation for 4 players.
     

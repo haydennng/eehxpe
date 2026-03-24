@@ -340,6 +340,52 @@ class MatchStorage:
                 pass
             return {'deleted_matches': 0}
     
+    def update_session_date(self, session_id: str, new_date: date, merge: bool = False) -> Dict:
+        """Update a session's date, optionally merging with an existing session on that date."""
+        with session_scope() as db_session:
+            # Find source session
+            try:
+                if isinstance(session_id, str) and session_id.startswith('session_'):
+                    date_str = session_id.replace('session_', '')
+                    source_date = datetime.fromisoformat(date_str).date()
+                    source_session = db_session.query(Session)\
+                        .filter(Session.session_date >= datetime.combine(source_date, datetime.min.time()))\
+                        .filter(Session.session_date < datetime.combine(source_date, datetime.max.time()))\
+                        .first()
+                else:
+                    numeric_id = int(session_id)
+                    source_session = db_session.query(Session).filter_by(id=numeric_id).first()
+            except Exception:
+                raise ValueError(f'Session not found: {session_id}')
+
+            if not source_session:
+                raise ValueError(f'Session not found: {session_id}')
+
+            # Check if a session already exists for the target date
+            target_session = db_session.query(Session)\
+                .filter(Session.session_date >= datetime.combine(new_date, datetime.min.time()))\
+                .filter(Session.session_date < datetime.combine(new_date, datetime.max.time()))\
+                .first()
+
+            if target_session and target_session.id != source_session.id:
+                if not merge:
+                    raise KeyError(f'A session already exists for {new_date}')
+
+                # Move all matches from source to target session
+                for match in list(source_session.matches):
+                    match.session_id = target_session.id
+
+                db_session.flush()
+                db_session.delete(source_session)
+                db_session.flush()
+
+                return self._session_to_dict(target_session)
+            else:
+                # No conflict: update the date
+                source_session.session_date = datetime.combine(new_date, datetime.min.time())
+                db_session.flush()
+                return self._session_to_dict(source_session)
+
     def _match_to_dict(self, match: MatchModel) -> Dict:
         """Convert database Match to dict format compatible with old API"""
         return {

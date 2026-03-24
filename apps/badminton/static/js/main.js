@@ -1224,10 +1224,14 @@ function togglePlayerSelection(btn) {
     
     // Clear or show recommendation explanation based on mode
     updateRecommendationExplanation();
-    
+
+    // Refresh on-deck whenever court selection changes — no Assign click needed
+    clearTimeout(window._onDeckDebounce);
+    window._onDeckDebounce = setTimeout(() => loadRecommendations(), 400);
+
     // Save state
     saveState();
-    
+
     validateForm();
 }
 
@@ -2295,15 +2299,18 @@ function updateTeamColors() {
 
 async function loadRecommendations() {
     try {
-        // Gather current court assignments to pass to API
+        // Build current court context from selectedPlayers (live UI state).
+        // This works without needing to click Assign — whoever is selected on court
+        // right now is treated as "currently playing" for the sit-out algorithm.
         const currentCourtsData = [];
-        for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
-            const assignment = courtAssignments[courtNum] || [];
-            if (assignment.length > 0) {
-                currentCourtsData.push({
-                    court: courtNum,
-                    players: assignment
-                });
+        const playersOnCourt = selectedPlayers.filter(p => p !== null);
+        if (playersOnCourt.length > 0) {
+            const numCourts = Math.ceil(playersOnCourt.length / 4);
+            for (let courtNum = 1; courtNum <= numCourts; courtNum++) {
+                const courtPlayers = playersOnCourt.slice((courtNum - 1) * 4, courtNum * 4);
+                if (courtPlayers.length > 0) {
+                    currentCourtsData.push({ court: courtNum, players: courtPlayers });
+                }
             }
         }
         
@@ -2740,21 +2747,22 @@ function clearRecommendations() {
 // --- On Deck Assign All ---
 function assignAllCourts() {
     if (!currentCourts || currentCourts.length === 0) return;
-    
+
     // Assign each recommendation to its respective court
     currentCourts.forEach((court, idx) => {
         const courtNum = court.court || (idx + 1);
         const teamA = court.team_a || [];
         const teamB = court.team_b || [];
-        
+
         // Store in courtAssignments
         courtAssignments[courtNum] = [...teamA, ...teamB];
         courtStates[courtNum] = 'assigned';
     });
-    
+
     // Update player selection to reflect court assignments
+    // (togglePlayerSelection will fire for each player, triggering on-deck refresh)
     updatePlayerSelectionFromCourts();
-    
+
     toast('All recommendations assigned to courts');
 }
 
@@ -2762,17 +2770,18 @@ function assignAllCourts() {
 function assignCourtRecommendation(courtNum) {
     const court = currentCourts.find(c => (c.court || 0) === courtNum);
     if (!court) return;
-    
+
     const teamA = court.team_a || [];
     const teamB = court.team_b || [];
-    
+
     // Store in courtAssignments
     courtAssignments[courtNum] = [...teamA, ...teamB];
     courtStates[courtNum] = 'assigned';
-    
+
     // Update player selection to reflect court assignments
+    // (togglePlayerSelection will fire for each player, triggering on-deck refresh)
     updatePlayerSelectionFromCourts();
-    
+
     toast(`Court ${courtNum} assigned`);
 }
 
@@ -2838,6 +2847,11 @@ function updatePlayerSelectionFromCourts() {
     
     // Update player button states (but don't call updateTeamPreview to avoid conflicts)
     updatePlayerButtonStates();
+
+    // selectedPlayers was updated directly — trigger on-deck refresh so it
+    // sees who is now on court without requiring a manual player toggle
+    clearTimeout(window._onDeckDebounce);
+    window._onDeckDebounce = setTimeout(() => loadRecommendations(), 400);
 }
 
 // Cycle all court recommendations at once
@@ -4111,12 +4125,13 @@ async function handleRecordMatch() {
         console.log('Resetting form...');
         resetMatchForm();
         
-        // Reload data (skip loadRecommendations to preserve current recommendations)
+        // Reload data and refresh on-deck recommendations based on new game history
         console.log('Reloading data...');
         await loadMatchHistory();
         await loadSessionStats();
         await loadPlayerEarnings();
         await loadSessionLogs();
+        await loadRecommendations();
         console.log('All done!');
     } catch (error) {
         console.error('Error recording match:', error);
@@ -4128,6 +4143,12 @@ async function handleRecordMatch() {
 function resetMatchForm() {
     // Clear player selection
     selectedPlayers = [];
+
+    // Clear court assignments so on-deck reloads with clean state
+    for (let i = 1; i <= MAX_COURTS; i++) {
+        courtAssignments[i] = [];
+        courtStates[i] = 'empty';
+    }
     
     // Clear from name buttons and remove court classes
     qsa('.player-name-btn').forEach(btn => {
