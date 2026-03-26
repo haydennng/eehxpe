@@ -498,6 +498,7 @@ let playersSelectedYear = 2026;
 let playersRangeStart = null;  // month number 1-12, or null = full year
 let playersRangeEnd = null;
 let playersAvailableMonths = {};  // { 2025: [1,2,...], 2026: [1,2,...] }
+let playersHideNoGames = false;
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -523,6 +524,17 @@ async function initPlayers() {
     renderYearButtons();
     renderMonthButtons();
     await loadPlayersWithEarnings();
+
+    // Hide no games toggle
+    const toggleBtn = qs('#toggleNoGamesBtn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            playersHideNoGames = !playersHideNoGames;
+            toggleBtn.textContent = playersHideNoGames ? 'Show all' : 'Hide no games';
+            toggleBtn.classList.toggle('active', playersHideNoGames);
+            loadPlayersWithEarnings();
+        });
+    }
 
     // Year button clicks
     qsa('.btn-year').forEach(btn => {
@@ -687,7 +699,14 @@ async function loadPlayersWithEarnings() {
 
         rows.sort((a, b) => b.mmr - a.mmr);
 
-        tbody.innerHTML = rows.map(({ name, mmr, net }) => {
+        const visibleRows = playersHideNoGames ? rows.filter(r => r.net !== null) : rows;
+
+        if (visibleRows.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No players with games in this period</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = visibleRows.map(({ name, mmr, net }) => {
             let earningsHtml;
             if (net === null) {
                 earningsHtml = `<span class="earnings-zero">—</span>`;
@@ -700,14 +719,14 @@ async function loadPlayersWithEarnings() {
             }
 
             const actionsCol = isAdmin()
-                ? `<td style="text-align: right;"><button class="btn btn-danger btn-small" onclick="deletePlayer('${escapeHtml(name)}')">Delete</button></td>`
+                ? `<td style="text-align: right; white-space: nowrap;"><button class="btn btn-danger btn-small" style="white-space: nowrap;" onclick="deletePlayer('${escapeHtml(name)}')">Delete</button></td>`
                 : '';
 
             return `
                 <tr>
                     <td>${escapeHtml(name)}</td>
-                    <td style="text-align: center;">${mmr}</td>
-                    <td style="text-align: center;">${earningsHtml}</td>
+                    <td style="text-align: center; white-space: nowrap;">${mmr}</td>
+                    <td style="text-align: center; white-space: nowrap;">${earningsHtml}</td>
                     ${actionsCol}
                 </tr>
             `;
