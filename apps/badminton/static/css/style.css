@@ -480,6 +480,34 @@ body[data-page="matchups"] .container {
     color: var(--text-muted);
 }
 
+/* Sortable column headers */
+th.sortable-col {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+th.sortable-col:hover {
+    color: var(--dg-500);
+}
+
+th.sortable-col.sort-active {
+    color: var(--dg-500);
+}
+
+.sort-indicator {
+    display: inline-block;
+    width: 0.75em;
+    font-size: 0.75em;
+    opacity: 0.4;
+    vertical-align: middle;
+}
+
+th.sortable-col.sort-active .sort-indicator {
+    opacity: 1;
+    color: var(--dg-500);
+}
+
 .btn-icon {
     display: inline-flex;
     align-items: center;

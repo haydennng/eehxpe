@@ -499,6 +499,9 @@ let playersRangeStart = null;  // month number 1-12, or null = full year
 let playersRangeEnd = null;
 let playersAvailableMonths = {};  // { 2025: [1,2,...], 2026: [1,2,...] }
 let playersHideNoGames = false;
+let playersSortCol = 'mmr';
+let playersSortDir = 'desc';
+let playersRowCache = [];  // cached { name, mmr, net } rows from last fetch
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -535,6 +538,23 @@ async function initPlayers() {
             loadPlayersWithEarnings();
         });
     }
+
+    // Sortable column header clicks
+    qsa('th.sortable-col').forEach(th => {
+        th.addEventListener('click', () => {
+            const col = th.dataset.col;
+            if (playersSortCol === col) {
+                playersSortDir = playersSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                playersSortCol = col;
+                playersSortDir = col === 'name' ? 'asc' : 'desc';
+            }
+            updateSortIndicators();
+            renderPlayersTable();
+        });
+    });
+
+    updateSortIndicators();
 
     // Year button clicks
     qsa('.btn-year').forEach(btn => {
@@ -647,95 +667,116 @@ function updateRangeLabel() {
 }
 
 async function loadPlayersWithEarnings() {
-    const tbody = qs('#playersTableBody');
     const actionsHeader = qs('#playersActionsHeader');
-
     if (actionsHeader) {
         actionsHeader.style.display = isAdmin() ? '' : 'none';
     }
 
-    const colspanCount = isAdmin() ? 4 : 3;
-
     try {
-        // Determine range params
         const y = playersSelectedYear;
-        let fromMonth, toMonth;
+        const fromMonth = playersRangeStart === null ? 1 : Math.min(playersRangeStart, playersRangeEnd);
+        const toMonth   = playersRangeStart === null ? 12 : Math.max(playersRangeStart, playersRangeEnd);
 
-        if (playersRangeStart === null) {
-            fromMonth = 1;
-            toMonth = 12;
-        } else {
-            fromMonth = Math.min(playersRangeStart, playersRangeEnd);
-            toMonth = Math.max(playersRangeStart, playersRangeEnd);
-        }
-
-        // Fetch players, earnings range, and MMR snapshot in parallel
         const [players, earnings, mmrSnap] = await Promise.all([
             api('./api/players'),
             api(`./api/earnings/range?from_year=${y}&from_month=${fromMonth}&to_year=${y}&to_month=${toMonth}`),
             api(`./api/mmr/snapshot?year=${y}&month=${toMonth}`)
         ]);
 
-        if (players.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No players added yet</td></tr>`;
-            return;
-        }
-
-        // Build earnings lookup
         const earningsMap = {};
         earnings.forEach(e => { earningsMap[e.player] = e.net_earnings; });
 
-        // Build MMR snapshot lookup
-        // mmrSnap is { playerName: mmrValue }
-        const mmrMap = mmrSnap;
-
-        // Merge and sort by MMR snapshot descending
-        const rows = players.map(p => {
+        playersRowCache = players.map(p => {
             const name = typeof p === 'string' ? p : p.name;
-            const mmr = mmrMap[name] !== undefined ? mmrMap[name] : Math.round((typeof p === 'object' && p.mmr) ? p.mmr : 1500);
-            const net = earningsMap[name] !== undefined ? earningsMap[name] : null;
+            const mmr  = mmrSnap[name] !== undefined ? mmrSnap[name] : Math.round((typeof p === 'object' && p.mmr) ? p.mmr : 1500);
+            const net  = earningsMap[name] !== undefined ? earningsMap[name] : null;
             return { name, mmr, net };
         });
 
-        rows.sort((a, b) => b.mmr - a.mmr);
-
-        const visibleRows = playersHideNoGames ? rows.filter(r => r.net !== null) : rows;
-
-        if (visibleRows.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No players with games in this period</td></tr>`;
-            return;
-        }
-
-        tbody.innerHTML = visibleRows.map(({ name, mmr, net }) => {
-            let earningsHtml;
-            if (net === null) {
-                earningsHtml = `<span class="earnings-zero">—</span>`;
-            } else if (net > 0) {
-                earningsHtml = `<span class="earnings-positive">+$${net}</span>`;
-            } else if (net < 0) {
-                earningsHtml = `<span class="earnings-negative">-$${Math.abs(net)}</span>`;
-            } else {
-                earningsHtml = `<span class="earnings-zero">$0</span>`;
-            }
-
-            const actionsCol = isAdmin()
-                ? `<td style="text-align: right; white-space: nowrap;"><button class="btn btn-danger btn-small" style="white-space: nowrap;" onclick="deletePlayer('${escapeHtml(name)}')">Delete</button></td>`
-                : '';
-
-            return `
-                <tr>
-                    <td>${escapeHtml(name)}</td>
-                    <td style="text-align: center; white-space: nowrap;">${mmr}</td>
-                    <td style="text-align: center; white-space: nowrap;">${earningsHtml}</td>
-                    ${actionsCol}
-                </tr>
-            `;
-        }).join('');
+        renderPlayersTable();
 
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">Failed to load players</td></tr>`;
+        const colspanCount = isAdmin() ? 4 : 3;
+        qs('#playersTableBody').innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">Failed to load players</td></tr>`;
         toast('Failed to load players', 'error');
     }
+}
+
+function renderPlayersTable() {
+    const tbody = qs('#playersTableBody');
+    const colspanCount = isAdmin() ? 4 : 3;
+
+    if (playersRowCache.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No players added yet</td></tr>`;
+        return;
+    }
+
+    // Filter
+    let rows = playersHideNoGames ? playersRowCache.filter(r => r.net !== null) : [...playersRowCache];
+
+    if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No players with games in this period</td></tr>`;
+        return;
+    }
+
+    // Sort
+    rows.sort((a, b) => {
+        let valA, valB;
+        if (playersSortCol === 'name') {
+            valA = a.name.toLowerCase();
+            valB = b.name.toLowerCase();
+            return playersSortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else if (playersSortCol === 'mmr') {
+            valA = a.mmr;
+            valB = b.mmr;
+        } else {
+            // net — treat null as -Infinity so they sort last when descending
+            valA = a.net !== null ? a.net : -Infinity;
+            valB = b.net !== null ? b.net : -Infinity;
+        }
+        return playersSortDir === 'asc' ? valA - valB : valB - valA;
+    });
+
+    // Render
+    tbody.innerHTML = rows.map(({ name, mmr, net }) => {
+        let earningsHtml;
+        if (net === null) {
+            earningsHtml = `<span class="earnings-zero">—</span>`;
+        } else if (net > 0) {
+            earningsHtml = `<span class="earnings-positive">+$${net}</span>`;
+        } else if (net < 0) {
+            earningsHtml = `<span class="earnings-negative">-$${Math.abs(net)}</span>`;
+        } else {
+            earningsHtml = `<span class="earnings-zero">$0</span>`;
+        }
+
+        const actionsCol = isAdmin()
+            ? `<td style="text-align: right; white-space: nowrap;"><button class="btn btn-danger btn-small" style="white-space: nowrap;" onclick="deletePlayer('${escapeHtml(name)}')">Delete</button></td>`
+            : '';
+
+        return `
+            <tr>
+                <td>${escapeHtml(name)}</td>
+                <td style="text-align: center; white-space: nowrap;">${mmr}</td>
+                <td style="text-align: center; white-space: nowrap;">${earningsHtml}</td>
+                ${actionsCol}
+            </tr>
+        `;
+    }).join('');
+}
+
+function updateSortIndicators() {
+    qsa('th.sortable-col').forEach(th => {
+        const col = th.dataset.col;
+        const indicator = th.querySelector('.sort-indicator');
+        const isActive = col === playersSortCol;
+        th.classList.toggle('sort-active', isActive);
+        if (isActive) {
+            indicator.textContent = playersSortDir === 'asc' ? ' ↑' : ' ↓';
+        } else {
+            indicator.textContent = ' ↕';
+        }
+    });
 }
 
 async function deletePlayer(name) {
