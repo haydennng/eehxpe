@@ -539,6 +539,12 @@ async function initPlayers() {
         });
     }
 
+    // Export CSV
+    const exportBtn = qs('#exportCsvBtn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', exportPlayersCSV);
+    }
+
     // Sortable column header clicks
     qsa('th.sortable-col').forEach(th => {
         th.addEventListener('click', () => {
@@ -777,6 +783,63 @@ function updateSortIndicators() {
             indicator.textContent = ' ↕';
         }
     });
+}
+
+function exportPlayersCSV() {
+    if (playersRowCache.length === 0) {
+        toast('No data to export', 'error');
+        return;
+    }
+
+    // Apply the same filter + sort as the current table view
+    let rows = playersHideNoGames ? playersRowCache.filter(r => r.net !== null) : [...playersRowCache];
+
+    rows.sort((a, b) => {
+        if (playersSortCol === 'name') {
+            const cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+            return playersSortDir === 'asc' ? cmp : -cmp;
+        }
+        const valA = playersSortCol === 'mmr' ? a.mmr : (a.net !== null ? a.net : -Infinity);
+        const valB = playersSortCol === 'mmr' ? b.mmr : (b.net !== null ? b.net : -Infinity);
+        return playersSortDir === 'asc' ? valA - valB : valB - valA;
+    });
+
+    // Build period label for header comment
+    let period;
+    if (playersRangeStart === null) {
+        period = `Full year ${playersSelectedYear}`;
+    } else {
+        const lo = Math.min(playersRangeStart, playersRangeEnd);
+        const hi = Math.max(playersRangeStart, playersRangeEnd);
+        period = lo === hi
+            ? `${MONTH_NAMES[lo - 1]} ${playersSelectedYear}`
+            : `${MONTH_NAMES[lo - 1]}-${MONTH_NAMES[hi - 1]} ${playersSelectedYear}`;
+    }
+
+    // Build CSV
+    const lines = [
+        `# Badminton Earnings — ${period}`,
+        'Name,MMR,Earnings',
+        ...rows.map(({ name, mmr, net }) => {
+            const earnings = net === null ? '' : (net >= 0 ? `+${net}` : `${net}`);
+            // Wrap name in quotes in case it contains commas
+            return `"${name.replace(/"/g, '""')}",${mmr},${earnings}`;
+        })
+    ];
+
+    const csv = lines.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    // Build filename: players_2026_Jan-Mar.csv
+    const safePeriod = period.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '');
+    const filename = `players_${safePeriod}.csv`;
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
 }
 
 async function deletePlayer(name) {
