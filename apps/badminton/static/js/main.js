@@ -502,6 +502,7 @@ let playersHideNoGames = false;
 let playersSortCol = 'mmr';
 let playersSortDir = 'desc';
 let playersRowCache = [];  // cached { name, mmr, net } rows from last fetch
+let playersEditingName = null;  // name of the row currently being renamed
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -756,19 +757,49 @@ function renderPlayersTable() {
             earningsHtml = `<span class="earnings-zero">$0</span>`;
         }
 
-        const actionsCol = isAdmin()
-            ? `<td style="text-align: right; white-space: nowrap;"><button class="btn btn-danger btn-small" style="white-space: nowrap;" onclick="deletePlayer('${escapeHtml(name)}')">Delete</button></td>`
-            : '';
+        const isEditing = isAdmin() && playersEditingName === name;
+
+        const nameCell = isEditing
+            ? `<td><input id="renameInput_${escapeHtml(name)}" class="form-input" style="padding: 0.3rem 0.6rem; font-size: 0.9rem; width: 100%;" value="${escapeHtml(name)}" /></td>`
+            : `<td>${escapeHtml(name)}</td>`;
+
+        let actionsCol = '';
+        if (isAdmin()) {
+            if (isEditing) {
+                actionsCol = `<td style="text-align: right; white-space: nowrap;">
+                    <button class="btn btn-primary btn-small" style="white-space: nowrap;" onclick="confirmRename('${escapeHtml(name)}')">Save</button>
+                    <button class="btn btn-secondary btn-small" style="white-space: nowrap; margin-left: 0.25rem;" onclick="cancelRename()">Cancel</button>
+                </td>`;
+            } else {
+                actionsCol = `<td style="text-align: right; white-space: nowrap;">
+                    <button class="btn btn-secondary btn-small" style="white-space: nowrap;" onclick="startRename('${escapeHtml(name)}')">Rename</button>
+                    <button class="btn btn-danger btn-small" style="white-space: nowrap; margin-left: 0.25rem;" onclick="deletePlayer('${escapeHtml(name)}')">Delete</button>
+                </td>`;
+            }
+        }
 
         return `
             <tr>
-                <td>${escapeHtml(name)}</td>
+                ${nameCell}
                 <td style="text-align: center; white-space: nowrap;">${mmr}</td>
                 <td style="text-align: center; white-space: nowrap;">${earningsHtml}</td>
                 ${actionsCol}
             </tr>
         `;
     }).join('');
+
+    // Focus the rename input if editing
+    if (playersEditingName) {
+        const input = document.getElementById(`renameInput_${playersEditingName}`);
+        if (input) {
+            input.focus();
+            input.select();
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') confirmRename(playersEditingName);
+                if (e.key === 'Escape') cancelRename();
+            });
+        }
+    }
 }
 
 function updateSortIndicators() {
@@ -851,6 +882,37 @@ async function deletePlayer(name) {
             method: 'DELETE'
         });
         toast(`Removed player: ${name}`);
+        await loadPlayersWithEarnings();
+    } catch (error) {
+        toast(error.message, 'error');
+    }
+}
+
+function startRename(name) {
+    playersEditingName = name;
+    renderPlayersTable();
+}
+
+function cancelRename() {
+    playersEditingName = null;
+    renderPlayersTable();
+}
+
+async function confirmRename(oldName) {
+    const input = document.getElementById(`renameInput_${oldName}`);
+    if (!input) return;
+    const newName = input.value.trim();
+    if (!newName || newName === oldName) {
+        cancelRename();
+        return;
+    }
+    try {
+        await api(`./api/players/${encodeURIComponent(oldName)}/rename`, {
+            method: 'PATCH',
+            body: JSON.stringify({ new_username: newName })
+        });
+        toast(`Renamed '${oldName}' to '${newName}'`);
+        playersEditingName = null;
         await loadPlayersWithEarnings();
     } catch (error) {
         toast(error.message, 'error');

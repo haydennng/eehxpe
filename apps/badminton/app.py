@@ -969,6 +969,51 @@ def add_player():
     return jsonify({'player': new_player, 'message': 'Player added successfully'})
 
 
+@app.route('/api/players/<name>/rename', methods=['PATCH'])
+@admin_required
+def rename_player(name):
+    """Rename a player (admin only). Updates username and all related records."""
+    data = request.json or {}
+    new_name = data.get('new_username', '').strip()
+
+    if not new_name:
+        return jsonify({'error': 'New username is required'}), 400
+    if len(new_name) < 3 or len(new_name) > 50:
+        return jsonify({'error': 'Username must be 3-50 characters'}), 400
+    if new_name == name:
+        return jsonify({'error': 'New name is the same as the current name'}), 400
+
+    with session_scope() as session:
+        user = session.query(User).filter_by(username=name).first()
+        if not user:
+            return jsonify({'error': 'Player not found'}), 404
+        if session.query(User).filter_by(username=new_name).first():
+            return jsonify({'error': f"Username '{new_name}' is already taken"}), 400
+
+        # Rename in database
+        user.username = new_name
+
+        # Update player_no_bet_status JSON keys in all affected matches
+        from models import Match as MatchModel
+        affected = session.query(MatchModel).filter(
+            MatchModel.player_no_bet_status.isnot(None)
+        ).all()
+        for match in affected:
+            status = match.player_no_bet_status
+            if isinstance(status, dict) and name in status:
+                new_status = {(new_name if k == name else k): v for k, v in status.items()}
+                match.player_no_bet_status = new_status
+
+    # Update in-memory session state
+    player = get_player_by_name(name)
+    if player:
+        player['name'] = new_name
+        with file_lock:
+            save_session()
+
+    return jsonify({'message': f"Renamed '{name}' to '{new_name}'"})
+
+
 @app.route('/api/players/<name>', methods=['DELETE'])
 @admin_required
 def delete_player(name):
