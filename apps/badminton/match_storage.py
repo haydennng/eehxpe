@@ -662,5 +662,46 @@ class MatchStorage:
         
         # Sort by net earnings descending
         earnings_list.sort(key=lambda x: x['net_earnings'], reverse=True)
-        
+
+        return earnings_list
+
+    def get_player_earnings_range(self, from_year: int, from_month: int, to_year: int, to_month: int) -> List[Dict]:
+        """
+        Calculate earnings for all players within a date range (both months inclusive).
+        """
+        range_start = datetime(from_year, from_month, 1, 0, 0, 0)
+
+        if to_month == 12:
+            range_end = datetime(to_year + 1, 1, 1, 0, 0, 0)
+        else:
+            range_end = datetime(to_year, to_month + 1, 1, 0, 0, 0)
+
+        all_matches = self.get_all_matches()
+        filtered = []
+
+        for match in all_matches:
+            timestamp_str = match.get('timestamp')
+            if not timestamp_str:
+                continue
+            try:
+                match_dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                if range_start <= match_dt < range_end:
+                    filtered.append(match)
+            except (ValueError, AttributeError):
+                continue
+
+        earnings_dict = self._compute_earnings(filtered)
+
+        earnings_list = [
+            {
+                'player': player,
+                'games_played': stats['games_played'],
+                'total_winnings': stats['total_winnings'],
+                'total_losses': stats['total_losses'],
+                'net_earnings': stats['net_earnings']
+            }
+            for player, stats in earnings_dict.items()
+        ]
+
+        earnings_list.sort(key=lambda x: x['net_earnings'], reverse=True)
         return earnings_list

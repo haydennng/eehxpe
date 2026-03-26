@@ -390,6 +390,96 @@ body[data-page="matchups"] .container {
     font-size: 0.875rem;
 }
 
+/* ==================== Players Earnings Filter ==================== */
+.earnings-year-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.btn-year {
+    padding: 0.4rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    background-color: var(--gm-700);
+    color: var(--text-muted);
+    border: 2px solid var(--gm-700);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-year:hover:not(.active) {
+    background-color: var(--gm-800);
+    border-color: var(--dg-500);
+    color: var(--text);
+}
+
+.btn-year.active {
+    background-color: var(--dg-700);
+    border-color: var(--dg-500);
+    color: var(--text);
+}
+
+.earnings-month-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+    min-height: 2.25rem;
+}
+
+.btn-month {
+    padding: 0.35rem 0.85rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    background-color: var(--gm-700);
+    color: var(--text-muted);
+    border: 2px solid var(--gm-700);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-month:hover:not(.active):not(.in-range) {
+    background-color: var(--gm-800);
+    border-color: var(--dg-500);
+    color: var(--text);
+}
+
+.btn-month.active {
+    background-color: var(--dg-700);
+    border-color: var(--dg-500);
+    color: var(--text);
+    font-weight: 600;
+}
+
+.btn-month.in-range {
+    background-color: var(--dg-900);
+    border-color: var(--dg-700);
+    color: var(--text);
+}
+
+.earnings-range-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.earnings-positive {
+    color: #4ade80;
+    font-weight: 600;
+}
+
+.earnings-negative {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.earnings-zero {
+    color: var(--text-muted);
+}
+
 .btn-icon {
     display: inline-flex;
     align-items: center;

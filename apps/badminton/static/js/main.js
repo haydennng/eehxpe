@@ -493,85 +493,228 @@ async function loadQuickRecap(sessions) {
 
 // ==================== Players Page ====================
 
+// Players page state
+let playersSelectedYear = 2026;
+let playersRangeStart = null;  // month number 1-12, or null = full year
+let playersRangeEnd = null;
+let playersAvailableMonths = {};  // { 2025: [1,2,...], 2026: [1,2,...] }
+
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 async function initPlayers() {
     await loadCurrentUser();
-    await loadPlayers();
-    
+
+    // Load sessions to determine which months have games
+    try {
+        const sessions = await api('./api/sessions');
+        sessions.forEach(s => {
+            const [y, m] = s.date.split('-').map(Number);
+            if (!playersAvailableMonths[y]) playersAvailableMonths[y] = new Set();
+            playersAvailableMonths[y].add(m);
+        });
+        // Convert sets to sorted arrays
+        for (const y in playersAvailableMonths) {
+            playersAvailableMonths[y] = [...playersAvailableMonths[y]].sort((a, b) => a - b);
+        }
+    } catch (e) {
+        // Fall back gracefully — filter buttons just won't show
+    }
+
+    renderYearButtons();
+    renderMonthButtons();
+    await loadPlayersWithEarnings();
+
+    // Year button clicks
+    qsa('.btn-year').forEach(btn => {
+        btn.addEventListener('click', () => {
+            playersSelectedYear = parseInt(btn.dataset.year);
+            playersRangeStart = null;
+            playersRangeEnd = null;
+            renderYearButtons();
+            renderMonthButtons();
+            loadPlayersWithEarnings();
+        });
+    });
+
     // Add player form
     qs('#addPlayerForm').addEventListener('submit', async (e) => {
         e.preventDefault();
-        
         const name = qs('#playerName').value.trim();
-        
         if (!name) {
             toast('Player name cannot be empty', 'error');
             return;
         }
-        
         try {
             await api('./api/players', {
                 method: 'POST',
                 body: JSON.stringify({ name })
             });
-            
             toast(`Added player: ${name}`);
             qs('#playerName').value = '';
-            await loadPlayers();
+            await loadPlayersWithEarnings();
         } catch (error) {
             toast(error.message, 'error');
         }
     });
 }
 
-async function loadPlayers() {
-    try {
-        const players = await api('./api/players');
-        const tbody = qs('#playersTableBody');
-        const actionsHeader = qs('#playersActionsHeader');
-        
-        // Hide actions column if not admin
-        if (actionsHeader) {
-            actionsHeader.style.display = isAdmin() ? '' : 'none';
+function renderYearButtons() {
+    qsa('.btn-year').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.year) === playersSelectedYear);
+    });
+}
+
+function renderMonthButtons() {
+    const container = qs('#monthButtonsContainer');
+    const months = playersAvailableMonths[playersSelectedYear] || [];
+
+    if (months.length === 0) {
+        container.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem;">No sessions recorded for this year</span>';
+        return;
+    }
+
+    container.innerHTML = months.map(m => {
+        let cls = 'btn-month';
+        if (playersRangeStart !== null && playersRangeEnd !== null) {
+            const lo = Math.min(playersRangeStart, playersRangeEnd);
+            const hi = Math.max(playersRangeStart, playersRangeEnd);
+            if (m === lo || m === hi) cls += ' active';
+            else if (m > lo && m < hi) cls += ' in-range';
+        } else if (playersRangeStart !== null && m === playersRangeStart) {
+            cls += ' active';
         }
-        
-        const colspanCount = isAdmin() ? 3 : 2;
-        
+        return `<button class="${cls}" data-month="${m}">${MONTH_NAMES[m - 1]}</button>`;
+    }).join('');
+
+    // Attach click handlers to the new buttons
+    container.querySelectorAll('.btn-month').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const m = parseInt(btn.dataset.month);
+            if (playersRangeStart === null) {
+                // Nothing selected → select this month
+                playersRangeStart = m;
+                playersRangeEnd = m;
+            } else if (playersRangeEnd !== null && playersRangeStart !== playersRangeEnd) {
+                // Range already set → reset to this month
+                playersRangeStart = m;
+                playersRangeEnd = m;
+            } else if (playersRangeStart === m) {
+                // Same month clicked → deselect (back to full year)
+                playersRangeStart = null;
+                playersRangeEnd = null;
+            } else {
+                // Extend to range
+                playersRangeEnd = m;
+            }
+            renderMonthButtons();
+            updateRangeLabel();
+            loadPlayersWithEarnings();
+        });
+    });
+
+    updateRangeLabel();
+}
+
+function updateRangeLabel() {
+    const label = qs('#earningsRangeLabel');
+    if (!label) return;
+
+    if (playersRangeStart === null) {
+        label.textContent = `Showing full year ${playersSelectedYear}`;
+        return;
+    }
+
+    const lo = Math.min(playersRangeStart, playersRangeEnd);
+    const hi = Math.max(playersRangeStart, playersRangeEnd);
+
+    if (lo === hi) {
+        label.textContent = `Showing ${MONTH_NAMES[lo - 1]} ${playersSelectedYear}`;
+    } else {
+        label.textContent = `Showing ${MONTH_NAMES[lo - 1]} – ${MONTH_NAMES[hi - 1]} ${playersSelectedYear}`;
+    }
+}
+
+async function loadPlayersWithEarnings() {
+    const tbody = qs('#playersTableBody');
+    const actionsHeader = qs('#playersActionsHeader');
+
+    if (actionsHeader) {
+        actionsHeader.style.display = isAdmin() ? '' : 'none';
+    }
+
+    const colspanCount = isAdmin() ? 4 : 3;
+
+    try {
+        // Determine range params
+        const y = playersSelectedYear;
+        let fromMonth, toMonth;
+
+        if (playersRangeStart === null) {
+            fromMonth = 1;
+            toMonth = 12;
+        } else {
+            fromMonth = Math.min(playersRangeStart, playersRangeEnd);
+            toMonth = Math.max(playersRangeStart, playersRangeEnd);
+        }
+
+        // Fetch players, earnings range, and MMR snapshot in parallel
+        const [players, earnings, mmrSnap] = await Promise.all([
+            api('./api/players'),
+            api(`./api/earnings/range?from_year=${y}&from_month=${fromMonth}&to_year=${y}&to_month=${toMonth}`),
+            api(`./api/mmr/snapshot?year=${y}&month=${toMonth}`)
+        ]);
+
         if (players.length === 0) {
             tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">No players added yet</td></tr>`;
             return;
         }
-        
-        // Sort players by MMR descending (highest first)
-        const sortedPlayers = players.sort((a, b) => {
-            const mmrA = (typeof a === 'object' && a.mmr) ? a.mmr : 1500;
-            const mmrB = (typeof b === 'object' && b.mmr) ? b.mmr : 1500;
-            return mmrB - mmrA;
+
+        // Build earnings lookup
+        const earningsMap = {};
+        earnings.forEach(e => { earningsMap[e.player] = e.net_earnings; });
+
+        // Build MMR snapshot lookup
+        // mmrSnap is { playerName: mmrValue }
+        const mmrMap = mmrSnap;
+
+        // Merge and sort by MMR snapshot descending
+        const rows = players.map(p => {
+            const name = typeof p === 'string' ? p : p.name;
+            const mmr = mmrMap[name] !== undefined ? mmrMap[name] : Math.round((typeof p === 'object' && p.mmr) ? p.mmr : 1500);
+            const net = earningsMap[name] !== undefined ? earningsMap[name] : null;
+            return { name, mmr, net };
         });
-        
-        tbody.innerHTML = sortedPlayers.map(player => {
-            // Handle both old string format and new object format
-            const playerName = typeof player === 'string' ? player : player.name;
-            const mmr = (typeof player === 'object' && player.mmr) ? player.mmr : 1500;
-            const mmrRounded = Math.round(mmr).toFixed(0);  // Round to whole number, no decimals
-            
-            // Only show actions column if user is admin
-            const actionsColumn = isAdmin() 
-                ? `<td style="text-align: right;">
-                       <button class="btn btn-danger btn-small" onclick="deletePlayer('${escapeHtml(playerName)}')">
-                           Delete
-                       </button>
-                   </td>`
+
+        rows.sort((a, b) => b.mmr - a.mmr);
+
+        tbody.innerHTML = rows.map(({ name, mmr, net }) => {
+            let earningsHtml;
+            if (net === null) {
+                earningsHtml = `<span class="earnings-zero">—</span>`;
+            } else if (net > 0) {
+                earningsHtml = `<span class="earnings-positive">+$${net}</span>`;
+            } else if (net < 0) {
+                earningsHtml = `<span class="earnings-negative">-$${Math.abs(net)}</span>`;
+            } else {
+                earningsHtml = `<span class="earnings-zero">$0</span>`;
+            }
+
+            const actionsCol = isAdmin()
+                ? `<td style="text-align: right;"><button class="btn btn-danger btn-small" onclick="deletePlayer('${escapeHtml(name)}')">Delete</button></td>`
                 : '';
-            
+
             return `
                 <tr>
-                    <td>${escapeHtml(playerName)}</td>
-                    <td style="text-align: center;">${mmrRounded}</td>
-                    ${actionsColumn}
+                    <td>${escapeHtml(name)}</td>
+                    <td style="text-align: center;">${mmr}</td>
+                    <td style="text-align: center;">${earningsHtml}</td>
+                    ${actionsCol}
                 </tr>
             `;
         }).join('');
+
     } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="${colspanCount}" class="table-empty">Failed to load players</td></tr>`;
         toast('Failed to load players', 'error');
     }
 }
@@ -580,14 +723,12 @@ async function deletePlayer(name) {
     if (!confirm(`Are you sure you want to remove ${name}?`)) {
         return;
     }
-    
     try {
         await api(`./api/players/${encodeURIComponent(name)}`, {
             method: 'DELETE'
         });
-        
         toast(`Removed player: ${name}`);
-        await loadPlayers();
+        await loadPlayersWithEarnings();
     } catch (error) {
         toast(error.message, 'error');
     }

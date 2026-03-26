@@ -1562,8 +1562,91 @@ def get_monthly_earnings():
     
     # Use match_storage's no-bet aware monthly earnings calculation
     earnings_list = storage.get_monthly_player_earnings(year, month)
-    
+
     return jsonify(earnings_list)
+
+
+@app.route('/api/earnings/range', methods=['GET'])
+@login_required
+def get_earnings_range():
+    """Get player earnings for a date range (both months inclusive).
+
+    Query params:
+        from_year (int): Start year
+        from_month (int): Start month 1-12
+        to_year (int): End year
+        to_month (int): End month 1-12
+    """
+    now = _now_pacific()
+    from_year = request.args.get('from_year', type=int) or now.year
+    from_month = request.args.get('from_month', type=int) or 1
+    to_year = request.args.get('to_year', type=int) or now.year
+    to_month = request.args.get('to_month', type=int) or now.month
+
+    earnings_list = storage.get_player_earnings_range(from_year, from_month, to_year, to_month)
+    return jsonify(earnings_list)
+
+
+@app.route('/api/mmr/snapshot', methods=['GET'])
+@login_required
+def get_mmr_snapshot():
+    """Get absolute MMR for all players as of the end of a given month.
+
+    Replays all matches chronologically up to end of target month.
+
+    Query params:
+        year (int): Target year
+        month (int): Target month 1-12
+    """
+    try:
+        from datetime import date as date_cls
+        from mmr_calculator import process_match
+
+        now = _now_pacific()
+        year = request.args.get('year', type=int) or now.year
+        month = request.args.get('month', type=int) or now.month
+
+        # Cutoff: first day of the month after the target
+        if month == 12:
+            cutoff = date_cls(year + 1, 1, 1)
+        else:
+            cutoff = date_cls(year, month + 1, 1)
+
+        all_matches = storage.get_all_matches()
+        all_matches.sort(key=lambda m: m.get('session_id', ''))
+
+        mmr_state = {}
+
+        for match in all_matches:
+            session_id = match.get('session_id', '')
+            date_str = session_id.replace('session_', '') if session_id.startswith('session_') else None
+            if not date_str:
+                continue
+            try:
+                match_date = date_cls.fromisoformat(date_str)
+            except ValueError:
+                continue
+
+            if match_date >= cutoff:
+                break
+
+            team1 = match.get('team1', [])
+            team2 = match.get('team2', [])
+            winner = match.get('winner')
+
+            for player in team1 + team2:
+                if player not in mmr_state:
+                    mmr_state[player] = 1500
+
+            if len(team1) == 2 and len(team2) == 2 and winner:
+                process_match(team1, team2, winner, mmr_state, k_factor=24)
+
+        return jsonify({p: round(v) for p, v in mmr_state.items()})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/mmr/monthly', methods=['GET'])
