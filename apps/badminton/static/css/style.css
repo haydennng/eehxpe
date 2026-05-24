@@ -150,6 +150,10 @@ body[data-page="matchups"] .container {
 
 /* Allow vertical scroll on mobile */
 @media (max-width: 768px) {
+    body[data-page="matchups"] .container {
+        padding: 0.25rem !important;
+    }
+
     body[data-page="matchups"] {
         overflow-y: auto;
         height: auto;
@@ -1690,6 +1694,7 @@ th.sortable-col.sort-active .sort-indicator {
     padding: 0.5rem;
     border-radius: 4px;
     min-height: 50px;
+    width: 100%;
 }
 
 .court-row .team.team-a {
@@ -1740,8 +1745,16 @@ th.sortable-col.sort-active .sort-indicator {
     color: var(--text);
     z-index: 1;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    gap: 0.1rem 0.3rem;
     min-height: 1.5rem;
+    text-align: left;
+}
+
+.team-amp {
+    color: var(--text-muted);
+    font-weight: 400;
 }
 
 /* Win probability percentage */
@@ -1804,199 +1817,148 @@ th.sortable-col.sort-active .sort-indicator {
     margin-bottom: 0.5rem;
 }
 
-/* ==================== On Deck Recommendations Styles ==================== */
-.on-deck-section {
-    background-color: var(--gm-800);
-    border-radius: 8px;
-    padding: 0.75rem;
-    margin-bottom: 1rem;
-    border: 2px solid var(--warn);
-}
-
-.on-deck-header {
+/* ==================== Court Scenario Tabs ==================== */
+.court-scenario-tabs {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.35rem;
     margin-bottom: 0.75rem;
 }
 
-.on-deck-header h3 {
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--text);
-    margin: 0;
-    margin-right: auto;
-}
-
-/* Minimized On Deck state */
-.on-deck-section.minimized .on-deck-container,
-.on-deck-section.minimized .on-deck-footer,
-.on-deck-section.minimized .on-deck-actions {
-    display: none;
-}
-
-.on-deck-section.minimized .on-deck-header {
-    margin-bottom: 0;
-}
-
-.btn-on-deck-minimize {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 0.25rem;
+.btn-scenario-tab {
+    flex: 1;
     display: flex;
+    flex-direction: row;
     align-items: center;
-    justify-content: center;
-    transition: color 0.2s ease, transform 0.2s ease;
+    gap: 0.5rem;
+    padding: 0.4rem 0.65rem;
+    background-color: var(--gm-800);
+    border: 2px solid var(--gm-600, #5A6165);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s, background-color 0.15s;
+    min-width: 0;
+}
+
+.btn-scenario-tab:hover {
+    border-color: var(--dg-500);
+    background-color: var(--gm-700);
+}
+
+.btn-scenario-tab.selected {
+    border-color: var(--dg-500);
+    background-color: rgba(64, 145, 108, 0.15);
+}
+
+.scenario-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
     flex-shrink: 0;
 }
 
-.btn-on-deck-minimize:hover {
-    color: var(--text);
+/* Competitive tab — sword icon, orange accent when selected */
+.btn-scenario-tab[data-scenario-idx="0"].selected {
+    border-color: var(--team-a);
+    background-color: rgba(231, 111, 81, 0.12);
+}
+.btn-scenario-tab[data-scenario-idx="0"].selected .scenario-label {
+    color: var(--team-a);
 }
 
-.on-deck-section.minimized .btn-on-deck-minimize {
-    transform: rotate(180deg);
+/* Balanced tab — scales icon, blue/green accent when selected */
+.btn-scenario-tab[data-scenario-idx="1"].selected {
+    border-color: var(--dg-500);
+    background-color: rgba(64, 145, 108, 0.15);
+}
+.btn-scenario-tab[data-scenario-idx="1"].selected .scenario-label {
+    color: var(--dg-500);
 }
 
-.on-deck-actions {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.on-deck-container {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.on-deck-empty {
-    text-align: center;
-    padding: 1rem;
+/* Fallback for unselected label colour */
+.btn-scenario-tab .scenario-label {
     color: var(--text-muted);
-    font-size: 0.9rem;
 }
 
-.on-deck-card {
-    background-color: var(--gm-700);
-    border: 2px solid var(--gm-600);
-    border-radius: 4px;
-    padding: 0.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    transition: border-color 0.2s ease;
-}
-
-.on-deck-card:hover {
-    border-color: var(--gm-500);
-}
-
-.on-deck-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.on-deck-court-label {
-    font-size: 0.9rem;
+.scenario-matchup {
+    font-size: 0.8rem;
     font-weight: 600;
     color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
 }
 
-.btn-on-deck-cycle {
-    background: none;
-    border: none;
-    color: var(--text-muted);
+/* Scenario tab wrapper: tab + cycle button side by side */
+.scenario-tab-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+}
+
+.scenario-tab-wrapper .btn-scenario-tab {
+    flex: 1;
+    border-radius: 6px 0 0 6px;
+    min-width: 0;
+}
+
+.btn-scenario-cycle {
+    flex-shrink: 0;
+    width: 2rem;
+    background: var(--gm-800);
+    border: 2px solid var(--gm-600, #5A6165);
+    border-left: none;
+    border-radius: 0 6px 6px 0;
     cursor: pointer;
-    padding: 0.25rem;
-    transition: color 0.2s ease, transform 0.2s ease;
+    color: var(--text-muted);
+    font-size: 1rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.8rem;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+    padding: 0;
 }
 
-.btn-on-deck-cycle:hover {
+.btn-scenario-cycle:hover {
+    background: var(--gm-700);
     color: var(--text);
-    transform: rotate(180deg);
 }
 
-.btn-on-deck-assign {
-    padding: 0.3rem 0.6rem;
-    font-size: 0.75rem;
-    background: #4A90E2;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: 500;
-    transition: background 0.2s;
+.btn-scenario-cycle:active {
+    background: var(--dg-700);
+    color: var(--text);
 }
 
-.btn-on-deck-assign:hover {
-    background: #357ABD;
+/* Random tab — dice icon, purple accent when selected */
+.btn-scenario-tab[data-scenario-idx="2"].selected {
+    border-color: var(--team-c);
+    background-color: rgba(168, 85, 247, 0.12);
+}
+.btn-scenario-tab[data-scenario-idx="2"].selected .scenario-label {
+    color: var(--team-c);
 }
 
-#btn-assign-all-courts {
-    padding: 0.35rem 0.7rem;
-    font-size: 0.85rem;
-    background: #4A90E2;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: 500;
-    transition: background 0.2s;
+/* Cycle button border tracks the selected-tab accent colour */
+.scenario-tab-wrapper:has(.btn-scenario-tab[data-scenario-idx="0"].selected) .btn-scenario-cycle {
+    border-color: var(--team-a);
+    background: rgba(231, 111, 81, 0.08);
 }
 
-#btn-assign-all-courts:hover {
-    background: #357ABD;
+.scenario-tab-wrapper:has(.btn-scenario-tab[data-scenario-idx="1"].selected) .btn-scenario-cycle {
+    border-color: var(--dg-500);
+    background: rgba(64, 145, 108, 0.1);
 }
 
-.on-deck-matchup {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.5rem;
-    background-color: var(--gm-750);
-    border-radius: 4px;
-}
-
-.on-deck-team-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-}
-
-.on-deck-stats {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.75rem;
-    color: rgba(230, 240, 234, 0.70);
-    background-color: transparent;
-}
-
-.on-deck-team {
-    display: flex;
-    align-items: center;
-    padding: 0.3rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.85rem;
-}
-
-.on-deck-team-a {
-    background-color: rgba(231, 111, 81, 0.15);
-    border: 2px solid var(--team-a);
-}
-
-.on-deck-team-b {
-    background-color: rgba(42, 157, 143, 0.15);
-    border: 2px solid var(--team-b);
+.scenario-tab-wrapper:has(.btn-scenario-tab[data-scenario-idx="2"].selected) .btn-scenario-cycle {
+    border-color: var(--team-c);
+    background: rgba(168, 85, 247, 0.08);
 }
 
 .on-deck-player {
@@ -2005,79 +1967,6 @@ th.sortable-col.sort-active .sort-indicator {
     color: var(--text);
 }
 
-.on-deck-vs {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    flex-shrink: 0;
-}
-
-.on-deck-stats .on-deck-win-prob {
-    font-size: 1em;
-    font-weight: 600;
-    color: var(--text-muted);
-    display: inline-block;
-    white-space: nowrap;
-}
-
-.on-deck-stats .mmr-change {
-    font-size: 1em;
-    font-weight: 600;
-    display: inline-block;
-}
-
-.on-deck-stats .mmr-win {
-    color: var(--ok);
-}
-
-.on-deck-stats .mmr-loss {
-    color: var(--danger);
-}
-
-.on-deck-court-info {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    text-align: center;
-    padding: 0.2rem;
-    background-color: var(--gm-750);
-    border-radius: 4px;
-}
-
-.on-deck-footer {
-    display: flex;
-    justify-content: flex-end;
-    padding-top: 0.75rem;
-    margin-top: 0.5rem;
-    border-top: 1px solid var(--gm-600);
-}
-
-/* Mobile responsive */
-@media (max-width: 768px) {
-    .on-deck-section {
-        padding: 0.75rem;
-        margin-bottom: 1rem;
-    }
-    
-    .on-deck-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.5rem;
-    }
-    
-    .on-deck-actions {
-        width: 100%;
-        justify-content: flex-end;
-    }
-    
-    .on-deck-matchup {
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-    
-    .on-deck-vs {
-        transform: rotate(90deg);
-    }
-}
 
 /* Court Section - Individual court container for multi-court mode */
 .court-section {
@@ -2212,10 +2101,155 @@ th.sortable-col.sort-active .sort-indicator {
     display: block;
 }
 
+/* Court score preset row - quick score buttons */
+.court-score-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+    flex-wrap: nowrap;
+}
+
+.score-preset-group {
+    display: flex;
+    gap: 0.3rem;
+    flex: 1;
+}
+
+.score-preset-group--a {
+    justify-content: flex-start;
+}
+
+.score-preset-group--b {
+    justify-content: flex-end;
+}
+
+.btn-score-preset {
+    padding: 0.35rem 0.5rem;
+    background-color: var(--gm-700);
+    border: 2px solid var(--gm-600, #5A6165);
+    border-radius: 6px;
+    font-size: 0.775rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.btn-score-preset:hover {
+    color: var(--text);
+}
+
+.btn-score-preset.team-a-win:hover,
+.btn-score-preset.team-a-win.selected {
+    background-color: var(--team-a);
+    border-color: var(--team-a);
+    color: #fff;
+}
+
+.btn-score-preset.team-b-win:hover,
+.btn-score-preset.team-b-win.selected {
+    background-color: var(--team-b);
+    border-color: var(--team-b);
+    color: #fff;
+}
+
 /* Court bet row - per-court bet selection */
 .court-bet-row {
     margin-top: 0.75rem;
     margin-bottom: 0.75rem;
+}
+
+/* Court birds row - per-court shuttlecock count */
+.court-birds-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.birds-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.birds-button-group {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.btn-bird {
+    padding: 0.4rem 0.75rem;
+    background-color: var(--gm-700);
+    color: var(--text);
+    border: 2px solid var(--gm-600);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: all 0.2s;
+    min-width: 40px;
+    text-align: center;
+}
+
+.btn-bird:hover {
+    background-color: var(--gm-800);
+    border-color: var(--dg-500);
+}
+
+.btn-bird.selected {
+    background-color: var(--dg-500);
+    border-color: var(--dg-500);
+    color: #fff;
+    box-shadow: 0 0 0 2px rgba(64, 145, 108, 0.3);
+}
+
+.btn-bird-plus {
+    padding: 0.4rem 0.6rem;
+    background-color: var(--gm-700);
+    color: var(--text-muted);
+    border: 2px dashed var(--gm-600);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 700;
+    transition: all 0.2s;
+    min-width: 36px;
+    text-align: center;
+    line-height: 1;
+}
+
+.btn-bird-plus:hover {
+    background-color: var(--gm-800);
+    border-color: var(--dg-500);
+    color: var(--text);
+}
+
+.btn-bird-plus.active {
+    border-color: var(--dg-500);
+    color: var(--dg-500);
+}
+
+.birds-custom-input {
+    width: 60px;
+    padding: 0.35rem 0.5rem;
+    background-color: var(--gm-800);
+    color: var(--text);
+    border: 2px solid var(--dg-500);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-align: center;
+}
+
+.birds-custom-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(64, 145, 108, 0.3);
 }
 
 /* Court actions - buttons for record and clear */
@@ -3505,16 +3539,17 @@ body {
         opacity: 0.1 !important;
     }
     
-    /* Mobile: stack player names vertically and center-align */
+    /* Mobile: left-align player names */
     .team-names {
         font-size: 0.85rem !important;
         display: flex !important;
-        flex-direction: column !important;
-        gap: 0.15rem !important;
-        line-height: 1.2 !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 0.1rem 0.25rem !important;
+        line-height: 1.3 !important;
         align-items: center !important;
-        text-align: center !important;
-        justify-content: center !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
     }
     
     /* Mobile: win probability on its own line below names */
@@ -4766,3 +4801,248 @@ td .date-design {
     }
 }
 
+/* ==================== Phone Compaction (matchup entry page) ==================== */
+/* Goal: fit the entire match-entry card on one screen without scrolling.
+   Strategy: reduce all vertical margins/padding, stack scenario tabs vertically,
+   stack score presets vertically, and shrink all chrome. */
+@media (max-width: 768px) {
+
+    /* Prevent any child from blowing out the viewport width */
+    .card--entry,
+    .court-section,
+    .court-row,
+    .court-score-row,
+    .court-bet-row,
+    .court-birds-row,
+    .court-scenario-tabs {
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow-x: hidden !important;
+    }
+
+    /* ── Card & section padding ─────────────────────────────────────────── */
+    .card--entry {
+        padding: 0.35rem !important;
+    }
+
+    .card-header {
+        font-size: 0.85rem !important;
+        padding: 0.35rem 0.5rem !important;
+        margin-bottom: 0.35rem !important;
+    }
+
+    .form-group {
+        margin-bottom: 0 !important;
+    }
+
+    /* ── Mode selection ──────────────────────────────────────────────────── */
+    .mode-selection {
+        gap: 0.35rem !important;
+        margin-bottom: 0.35rem !important;
+    }
+
+    .btn-mode {
+        padding: 0.3rem 0.5rem !important;
+        font-size: 0.75rem !important;
+        gap: 0.3rem !important;
+    }
+
+    .btn-mode .mode-icon {
+        font-size: 0.95rem !important;
+    }
+
+    /* ── Clear / lock button row ─────────────────────────────────────────── */
+    div[style*="justify-content: space-between"] {
+        margin-bottom: 0.25rem !important;
+    }
+
+    /* ── Player pills: always 3 columns, no overflow ────────────────────── */
+    .player-toggle-grid,
+    .player-toggle-grid--3col,
+    .player-toggle-grid--4col {
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 8px !important;
+        padding: 0 !important;
+        margin-bottom: 0.35rem !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    .player-name-btn {
+        padding: 4px 3px !important;
+        font-size: 10px !important;
+        min-width: 0 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: nowrap !important;
+    }
+
+    /* ── Court section container ─────────────────────────────────────────── */
+    .court-section {
+        padding: 0.4rem !important;
+        margin-bottom: 0.35rem !important;
+    }
+
+    .court-header {
+        margin-bottom: 0.3rem !important;
+        padding-bottom: 0.25rem !important;
+    }
+
+    .court-label {
+        font-size: 0.8rem !important;
+    }
+
+    /* ── Scenario tabs: already stacked vertically (global default) ─────── */
+    .court-scenario-tabs {
+        gap: 0.2rem !important;
+        margin-bottom: 0.3rem !important;
+    }
+
+    .scenario-tab-wrapper {
+        width: 100% !important;
+    }
+
+    .btn-scenario-tab {
+        padding: 0.25rem 0.4rem !important;
+        gap: 0.35rem !important;
+        width: 100% !important;
+    }
+
+    .btn-scenario-cycle {
+        width: 1.8rem !important;
+        font-size: 0.9rem !important;
+    }
+
+    .scenario-label {
+        font-size: 0.6rem !important;
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
+    }
+
+    .scenario-matchup {
+        font-size: 0.68rem !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+
+    /* ── Court row (team fields) ─────────────────────────────────────────── */
+    .court-row .team {
+        min-height: 40px !important;
+        min-width: 0 !important;
+    }
+
+    .team-names {
+        font-size: 0.75rem !important;
+        gap: 0.1rem 0.2rem !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+    }
+
+    .court-row .score-input {
+        width: 44px !important;
+        font-size: 0.85rem !important;
+        padding: 3px !important;
+        flex-shrink: 0 !important;
+    }
+
+    /* ── Score preset row: red under red team, blue under blue team ─────── */
+    .court-score-row {
+        flex-direction: row !important;
+        margin-top: 0.2rem !important;
+        margin-bottom: 0.1rem !important;
+        gap: 0 !important;
+    }
+
+    .score-preset-group {
+        gap: 0.15rem !important;
+        flex: 1 !important;
+    }
+
+    /* A gap in the centre matching the VS icon + score-input area */
+    .score-preset-group--a {
+        justify-content: flex-start !important;
+        padding-right: 0.3rem !important;
+    }
+
+    .score-preset-group--b {
+        justify-content: flex-end !important;
+        padding-left: 0.3rem !important;
+    }
+
+    .btn-score-preset {
+        flex: 1 !important;
+        padding: 0.15rem 0 !important;
+        font-size: 0.55rem !important;
+        text-align: center !important;
+        min-width: 0 !important;
+    }
+
+    /* ── Bet + birds: compact stacked rows ──────────────────────────────── */
+    .court-bet-row {
+        margin-top: 0.25rem !important;
+        margin-bottom: 0 !important;
+    }
+
+    .court-birds-row {
+        margin-top: 0.2rem !important;
+        margin-bottom: 0 !important;
+        gap: 0.3rem !important;
+    }
+
+    .bet-button-group {
+        grid-template-columns: repeat(6, 1fr) !important;
+        gap: 2px !important;
+        width: 100% !important;
+    }
+
+    .btn-bet {
+        padding: 5px 0 !important;
+        font-size: 10px !important;
+        min-width: 0 !important;
+    }
+
+    .birds-button-group {
+        gap: 3px !important;
+    }
+
+    .btn-bird {
+        padding: 0.2rem 0.4rem !important;
+        font-size: 0.75rem !important;
+        min-width: 28px !important;
+    }
+
+    .btn-bird-plus {
+        padding: 0.2rem 0.35rem !important;
+        font-size: 0.85rem !important;
+        min-width: 26px !important;
+    }
+
+    .birds-label {
+        font-size: 0.75rem !important;
+    }
+
+    /* ── Record button ───────────────────────────────────────────────────── */
+    .court-actions {
+        margin-top: 0.3rem !important;
+    }
+
+    .record-court-btn {
+        padding: 0.4rem !important;
+        font-size: 0.82rem !important;
+    }
+
+    /* ── Session info header ─────────────────────────────────────────────── */
+    .session-info-header {
+        padding: 0.3rem 0.5rem !important;
+        margin-bottom: 0.3rem !important;
+    }
+
+    .session-info-content {
+        font-size: 0.75rem !important;
+    }
+}

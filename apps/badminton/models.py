@@ -6,7 +6,7 @@ SQLAlchemy ORM models for users, sessions, matches, and player statistics.
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum as SQLEnum, JSON, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 import enum
@@ -21,9 +21,17 @@ Base = declarative_base()
 
 
 class UserRole(enum.Enum):
-    """User role enumeration"""
+    """User role enumeration.
+
+    PLAYER — a real player; appears in the roster and player selection.
+    ADMIN  — administrative account; can log in with full privileges but is
+             excluded from the player roster and match selection.
+    DEMO   — read-only/demo account; can log in to view the app but is
+             excluded from the player roster and match selection.
+    """
     PLAYER = "player"
     ADMIN = "admin"
+    DEMO = "demo"
 
 
 class User(Base):
@@ -35,6 +43,11 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(SQLEnum(UserRole), nullable=False, default=UserRole.PLAYER)
     mmr = Column(Float, nullable=False, default=1500.0)
+    # Player roster status fields (migrated from players.json)
+    active = Column(Boolean, nullable=False, default=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    no_bet = Column(Boolean, nullable=False, default=False)
+    deactivated = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=_now_pacific)
     updated_at = Column(DateTime, nullable=False, default=_now_pacific, onupdate=_now_pacific)
     
@@ -51,9 +64,14 @@ class User(Base):
         """Convert user to dictionary"""
         data = {
             'id': self.id,
+            'name': self.username,       # Frontend uses 'name'
             'username': self.username,
             'role': self.role.value,
             'mmr': self.mmr,
+            'active': self.active,
+            'order': self.display_order,  # Frontend uses 'order'
+            'no_bet': self.no_bet,
+            'deactivated': self.deactivated,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -61,11 +79,12 @@ class User(Base):
             data['password_hash'] = self.password_hash
         return data
     
-    # Flask-Login integration
+    # Flask-Login integration (is_active = always True: means account is login-capable,
+    # separate from the roster 'active' column which tracks session participation)
     @property
     def is_authenticated(self):
         return True
-    
+
     @property
     def is_active(self):
         return True
@@ -133,7 +152,10 @@ class Match(Base):
     
     # No-bet player tracking (JSON dict of player_name: bool)
     player_no_bet_status = Column(JSON, nullable=True)
-    
+
+    # Shuttlecock count used in this match
+    birds_used = Column(Integer, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=_now_pacific)
     
     # Relationships

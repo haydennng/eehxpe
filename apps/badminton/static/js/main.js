@@ -931,12 +931,14 @@ let currentSession = null;
 // Per-court state for individual recording (scalable to N courts)
 const MAX_COURTS = 5; // Support up to 5 courts (20 players)
 let selectedBets = {}; // Bet per court {1: null, 2: null, ...}
+let selectedBirds = {}; // Birds used per court {1: null, 2: null, ...}
 let courtStates = {}; // Court states {1: 'empty', 2: 'empty', ...}
 let courtAssignments = {}; // Player assignments {1: [], 2: [], ...}
 
 // Initialize court state objects with default $1 bet
 for (let i = 1; i <= MAX_COURTS; i++) {
     selectedBets[i] = 1; // Default to $1
+    selectedBirds[i] = 1; // Default to 1 bird
     courtStates[i] = 'empty';
     courtAssignments[i] = [];
 }
@@ -952,19 +954,7 @@ function getRequiredCourts() {
     return Math.max(1, Math.floor(activePlayersCount / 4));
 }
 
-// Recommendation state (legacy single-court)
-let currentRecommendation = null;
-let allRecommendations = [];
-let recommendationIndex = 0;
-
-// Dual-court state
-let isDualCourt = false;
-let currentCourts = []; // [{court:1, team_a:[...], team_b:[...]}, ...]
-let currentRecommendedIds = []; // 4 or 8 player names in court order
 let activePlayersCount = 0; // Track active player count
-
-// Track previously suggested player sets for single-court cycling
-let previouslyExcludedPlayerSets = []; // Array of player name arrays that have been suggested
 
 // 2v2 mode state
 let mode2v2 = false; // false = Free For All, true = 2v2
@@ -978,7 +968,10 @@ const STORAGE_KEY_MODE = 'badminton_mode_2v2';
 const STORAGE_KEY_SELECTED = 'badminton_selected_players';
 const STORAGE_KEY_LOCKED = 'badminton_teams_locked';
 const STORAGE_KEY_LOCKED_TEAMS = 'badminton_locked_teams';
-const STORAGE_KEY_ON_DECK_MINIMIZED = 'badminton_on_deck_minimized';
+// currentScenarios holds the scenario arrays returned by /api/scenarios
+// Shape: { competitive: [{team1:[...], team2:[...]}, ...], balanced: [...], random: [...] }
+// Each array is a flat list of court matchup objects (index = court position, 0-based).
+let currentScenarios = {competitive: [], balanced: [], random: []};
 
 async function initMatchups() {
     try {
@@ -999,33 +992,22 @@ async function initMatchups() {
         console.log('Loading players...');
         await loadPlayersForMatchups();
         console.log('Players loaded');
-        
+
         // Restore saved state after players are loaded
         console.log('Restoring saved state...');
         restoreState();
         applyRestoredState();
         console.log('State restored');
-        
-        console.log('Loading match history...');
-        await loadMatchHistory();
-        console.log('Match history loaded');
-        
-        console.log('Loading session stats...');
-        await loadSessionStats();
-        console.log('Session stats loaded');
-        
-        console.log('Loading player earnings...');
-        await loadPlayerEarnings();
-        console.log('Player earnings loaded');
-        
-        console.log('Loading session logs...');
-        await loadSessionLogs();
-        console.log('Session logs loaded');
-        
-        // Load recommendations automatically on init
-        console.log('Loading recommendations...');
-        await loadRecommendations();
-        console.log('Recommendations loaded');
+
+        // Load scenarios immediately after players/courts are ready, before other slow loads
+        await loadScenarios();
+
+        await Promise.all([
+            loadMatchHistory(),
+            loadSessionStats(),
+            loadPlayerEarnings(),
+            loadSessionLogs(),
+        ]);
         
         // Set up bet button handlers (per-court)
         const betButtons = qsa('.btn-bet');
@@ -1064,19 +1046,95 @@ async function initMatchups() {
             }
         }
         
+        // Default birds to 1 for all courts on load
+        for (let i = 1; i <= MAX_COURTS; i++) {
+            selectBirds(i, 1);
+        }
+
+        // Set up birds button handlers (per-court)
+        qsa('.btn-bird').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const courtNum = parseInt(btn.dataset.court);
+                const birdValue = parseInt(btn.dataset.value);
+                selectBirds(courtNum, birdValue);
+            });
+        });
+
+        qsa('.btn-bird-plus').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const courtNum = parseInt(btn.dataset.court);
+                const input = qs(`#court${courtNum}-birdsCustomInput`);
+                const isVisible = input.style.display !== 'none';
+                if (isVisible) {
+                    input.style.display = 'none';
+                    btn.classList.remove('active');
+                    // If there's a value in input, keep it selected; otherwise clear
+                    if (!input.value) {
+                        // No custom value entered, leave birds as-is
+                    }
+                } else {
+                    input.style.display = '';
+                    btn.classList.add('active');
+                    input.focus();
+                }
+            });
+        });
+
+        qsa('.birds-custom-input').forEach(input => {
+            input.addEventListener('input', () => {
+                const courtNum = parseInt(input.dataset.court);
+                const val = parseInt(input.value);
+                if (!isNaN(val) && val >= 1) {
+                    // Deselect preset buttons and set custom value
+                    qsa(`.btn-bird[data-court="${courtNum}"]`).forEach(b => b.classList.remove('selected'));
+                    selectedBirds[courtNum] = val;
+                } else {
+                    selectedBirds[courtNum] = null;
+                }
+            });
+        });
+
         // Set up score input handlers for all courts (per-court validation)
         for (let i = 1; i <= MAX_COURTS; i++) {
             const scoreA = qs(`#court${i}-score-a`);
             const scoreB = qs(`#court${i}-score-b`);
-            
+
             if (scoreA && scoreB) {
-                scoreA.addEventListener('input', () => validateCourt(i));
-                scoreB.addEventListener('input', () => validateCourt(i));
+                const clearPresets = () => qsa(`.btn-score-preset[data-court="${i}"]`).forEach(b => b.classList.remove('selected'));
+                scoreA.addEventListener('input', () => { clearPresets(); validateCourt(i); });
+                scoreB.addEventListener('input', () => { clearPresets(); validateCourt(i); });
             } else if (i === 1) {
                 console.warn(`Court ${i} score inputs not found - this may affect form validation`);
             }
         }
-        
+
+        // Set up quick score preset buttons
+        qsa('.btn-score-preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const courtNum = parseInt(btn.dataset.court);
+                const winner = btn.dataset.winner; // 'a' or 'b'
+                const loserScore = parseInt(btn.dataset.loserScore);
+                const scoreA = qs(`#court${courtNum}-score-a`);
+                const scoreB = qs(`#court${courtNum}-score-b`);
+
+                if (!scoreA || !scoreB) return;
+
+                if (winner === 'a') {
+                    scoreA.value = 21;
+                    scoreB.value = loserScore;
+                } else {
+                    scoreA.value = loserScore;
+                    scoreB.value = 21;
+                }
+
+                // Highlight selected preset, clear others for this court
+                qsa(`.btn-score-preset[data-court="${courtNum}"]`).forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+
+                validateCourt(courtNum);
+            });
+        });
+
         // Set up record and clear court buttons for all courts dynamically
         for (let i = 1; i <= MAX_COURTS; i++) {
             const recordBtn = qs(`#recordCourt${i}Btn`);
@@ -1098,61 +1156,6 @@ async function initMatchups() {
                 clearBtn.addEventListener('click', () => clearCourt(i));
             }
             
-            if (cycleBtn) {
-                cycleBtn.addEventListener('click', async () => {
-                    try {
-                        await cycleSingleCourt(i);
-                    } catch (err) {
-                        console.error('Cycle button click error:', err);
-                        toast('An error occurred', 'error');
-                    }
-                });
-            }
-        }
-        
-        // Set up unified recommendation/cycle button handler
-        const cycleBtn = qs('#btn-cycle-recommendation');
-        if (cycleBtn) {
-        cycleBtn.addEventListener('click', async () => {
-            console.log('Cycle button clicked. Selected players:', selectedPlayers.length);
-            console.log('isDualCourt:', isDualCourt);
-            console.log('activePlayersCount:', activePlayersCount);
-            console.log('allRecommendations:', allRecommendations);
-            
-            // In 2v2 locked mode, cycle through team matchups
-            if (mode2v2 && teamsLocked && lockedTeams.length >= 2) {
-                console.log('2v2 locked mode - cycling team matchups');
-                cycle2v2LockedTeams();
-                return;
-            }
-            
-            // If no players selected, pick the current recommended matchup
-            if (selectedPlayers.length === 0) {
-                console.log('No players selected, setting recommended matchup');
-                setRecommendedMatchup();
-            } else {
-                // For dual-court mode (8+ players): clear selection and get fresh recommendation
-                if (isDualCourt) {
-                    console.log('Dual-court mode - clearing and getting fresh recommendation');
-                    selectedPlayers = [];
-                    qsa('.player-name-btn').forEach(btn => {
-                        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
-                        btn.setAttribute('aria-pressed', 'false');
-                    });
-                    updatePlayerButtonStates();
-                    updateTeamPreview();
-                    await cycleRecommendation();
-                    setRecommendedMatchup();
-                    return;
-                }
-                
-                // If players are selected, cycle to next recommendation and auto-select them
-                console.log('Players selected, cycling recommendation');
-                await cycleRecommendation();
-                console.log('After cycleRecommendation, calling setRecommendedMatchup');
-                setRecommendedMatchup();
-            }
-        });
         }
         
         // Set up clear selected players button handler
@@ -1175,31 +1178,15 @@ async function initMatchups() {
             btnLockToggle.addEventListener('click', toggleTeamsLock);
         }
         
-        // Set up On Deck Cycle All button
-        const btnCycleAll = qs('#btn-cycle-all-courts');
-        if (btnCycleAll) {
-            btnCycleAll.addEventListener('click', cycleAllCourts);
-        }
-        
-        // Set up On Deck Clear All button
-        const btnClearAll = qs('#btn-clear-all-courts');
-        if (btnClearAll) {
-            btnClearAll.addEventListener('click', clearAllCourts);
-        }
-        
-        // Set up On Deck minimize toggle (restore saved state)
-        const onDeckSection = qs('#onDeckSection');
-        const btnMinimize = qs('#btn-on-deck-minimize');
-        if (onDeckSection && btnMinimize) {
-            if (localStorage.getItem(STORAGE_KEY_ON_DECK_MINIMIZED) === '1') {
-                onDeckSection.classList.add('minimized');
-            }
-            btnMinimize.addEventListener('click', () => {
-                const isMinimized = onDeckSection.classList.toggle('minimized');
-                localStorage.setItem(STORAGE_KEY_ON_DECK_MINIMIZED, isMinimized ? '1' : '0');
+        // Set up scenario tab click handlers (per-court, per-scenario-index)
+        qsa('.btn-scenario-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const courtNum = parseInt(btn.dataset.court);
+                const scenarioIdx = parseInt(btn.dataset.scenarioIdx);
+                applyScenario(courtNum, scenarioIdx);
             });
-        }
-        
+        });
+
         // Set up resize handler to re-render match history on breakpoint change
         let lastIsMobile = window.matchMedia('(max-width: 768px)').matches;
         let resizeTimeout = null;
@@ -1266,9 +1253,6 @@ async function loadPlayersForMatchups() {
         renderPlayers();
         
         console.log('loadPlayersForMatchups: Players rendered successfully');
-        
-        // Load recommendations after players are rendered
-        await loadRecommendations();
     } catch (error) {
         console.error('loadPlayersForMatchups ERROR:', error);
         toast('Failed to load players', 'error');
@@ -1479,9 +1463,11 @@ function togglePlayerSelection(btn) {
         // In 2v2 mode, can select up to 8 players (4 teams of 2)
         maxSelected = 8;
     } else {
-        // In Free For All mode, allow up to MAX_COURTS * 4 players (up to 5 courts = 20 players)
-        // Don't restrict by activePlayersCount to allow manual selection
-        maxSelected = MAX_COURTS * 4;
+        // In Free For All mode, cap selections to exactly the players needed
+        // for the number of courts derived from the active player count.
+        // e.g. 4–7 active players → 1 court → max 4 selections
+        //      8–11 active players → 2 courts → max 8 selections
+        maxSelected = getRequiredCourts() * 4;
     }
     
     if (isSelected) {
@@ -1551,9 +1537,6 @@ function togglePlayerSelection(btn) {
     // Clear or show recommendation explanation based on mode
     updateRecommendationExplanation();
 
-    // Refresh on-deck whenever court selection changes — no Assign click needed
-    clearTimeout(window._onDeckDebounce);
-    window._onDeckDebounce = setTimeout(() => loadRecommendations(), 400);
 
     // Save state
     saveState();
@@ -2006,8 +1989,8 @@ async function deactivatePlayer(playerName) {
         });
         console.log('Player deactivated status saved successfully');
         
-        // Reload recommendations since player pool changed
-        await loadRecommendations();
+        // Reload scenarios since player pool changed
+        await loadScenarios();
         toast(`${playerName} removed from session`);
     } catch (error) {
         console.error('Failed to save player deactivated status:', error);
@@ -2074,8 +2057,8 @@ async function reactivatePlayer(playerName) {
         });
         console.log('Player reactivated status saved successfully');
         
-        // Reload recommendations since player pool changed
-        await loadRecommendations();
+        // Reload scenarios since player pool changed
+        await loadScenarios();
         toast(`${playerName} added to session`);
     } catch (error) {
         console.error('Failed to save player reactivated status:', error);
@@ -2285,8 +2268,8 @@ async function togglePlayerActive(playerName) {
         });
         console.log('Player status saved successfully:', { active: newActive, no_bet: newNoBet });
         
-        // Reload recommendations since active players changed
-        await loadRecommendations();
+        // Reload scenarios since active players changed
+        await loadScenarios();
     } catch (error) {
         console.error('Failed to save player status:', error);
         toast('Failed to update player status', 'error');
@@ -2349,36 +2332,6 @@ async function ensureSelectionCount() {
     validateForm();
 }
 
-// Get next recommended player that isn't already selected or inactive
-function getNextRecommendedPlayer() {
-    if (!currentRecommendation) return null;
-    
-    // Get all players from current recommendation
-    const recommendedPlayers = [
-        ...currentRecommendation.teamA,
-        ...currentRecommendation.teamB
-    ];
-    
-    // Find first player not already selected and is active
-    for (const playerName of recommendedPlayers) {
-        if (selectedPlayers.includes(playerName)) continue;
-        
-        // Check if player is active
-        const player = allPlayers.find(p => {
-            const name = typeof p === 'string' ? p : p.name;
-            return name === playerName;
-        });
-        
-        if (!player) continue;
-        
-        const isActive = typeof player === 'string' ? true : (player.active !== undefined ? player.active : true);
-        if (isActive) {
-            return playerName;
-        }
-    }
-    
-    return null;
-}
 
 function updatePlayerButtonStates() {
     const clearBtn = qs('#btn-clear-selected');
@@ -2493,7 +2446,17 @@ function clearSelectedPlayers() {
             btn.setAttribute('aria-pressed', betValue === 1 ? 'true' : 'false');
             btn.disabled = false;
         });
-        
+
+        // Reset birds to default 1 for this court
+        const birdsInput = qs(`#court${i}-birdsCustomInput`);
+        const birdsPlusBtn = qs(`.btn-bird-plus[data-court="${i}"]`);
+        if (birdsInput) { birdsInput.style.display = 'none'; birdsInput.value = ''; }
+        if (birdsPlusBtn) birdsPlusBtn.classList.remove('active');
+        selectBirds(i, 1);
+
+        // Reset score preset buttons for this court
+        qsa(`.btn-score-preset[data-court="${i}"]`).forEach(btn => btn.classList.remove('selected'));
+
         // Validate court (should disable record button)
         validateCourt(i);
     }
@@ -2623,891 +2586,151 @@ function updateTeamColors() {
     });
 }
 
-async function loadRecommendations() {
+// ==================== Scenario Tabs ====================
+
+/**
+ * Fetch paired scenarios from /api/scenarios and render them on all court tabs.
+ * Called on page load, after player roster changes, and after recording a match.
+ */
+async function loadScenarios() {
     try {
-        // Build current court context from selectedPlayers (live UI state).
-        // This works without needing to click Assign — whoever is selected on court
-        // right now is treated as "currently playing" for the sit-out algorithm.
-        const currentCourtsData = [];
-        const playersOnCourt = selectedPlayers.filter(p => p !== null);
-        if (playersOnCourt.length > 0) {
-            const numCourts = Math.ceil(playersOnCourt.length / 4);
-            for (let courtNum = 1; courtNum <= numCourts; courtNum++) {
-                const courtPlayers = playersOnCourt.slice((courtNum - 1) * 4, courtNum * 4);
-                if (courtPlayers.length > 0) {
-                    currentCourtsData.push({ court: courtNum, players: courtPlayers });
-                }
-            }
-        }
-        
-        // Build query string with current courts
-        const params = new URLSearchParams();
-        if (currentCourtsData.length > 0) {
-            params.append('current_courts', JSON.stringify(currentCourtsData));
-        }
-        
-        const url = `./api/recommendations${params.toString() ? '?' + params.toString() : ''}`;
-        const response = await api(url);
-        
-        // Check if multi-court mode (supports N courts dynamically)
-        if (response.multi_court || response.dual_court) {
-            // Multi-court mode: N players across N courts
-            const numCourts = response.num_courts || (response.dual_court ? 2 : 1);
-            isDualCourt = numCourts > 1;  // Keep for legacy compatibility
-            currentCourts = response.matchups || [];
-            currentRecommendedIds = response.player_ids || [];
-            
-            console.log(`Multi-court mode enabled: ${numCourts} courts`, currentCourts);
-            
-            // Build legacy currentRecommendation for compatibility
-            if (currentCourts.length > 0) {
-                currentRecommendation = {
-                    teamA: currentCourts[0].team_a,
-                    teamB: currentCourts[0].team_b,
-                    explanation: currentCourts[0].explanation
-                };
-            }
-        } else {
-            // Single-court mode: 4 players
-            isDualCourt = false;
-            currentRecommendedIds = response.player_ids || [];
-            
-            // Build currentCourts array with single court for unified handling
-            if (response.team_a && response.team_b) {
-                currentCourts = [{
-                    court: 1,
-                    team_a: response.team_a,
-                    team_b: response.team_b,
-                    explanation: response.explanation
-                }];
-                
-                currentRecommendation = {
-                    teamA: response.team_a,
-                    teamB: response.team_b,
-                    explanation: response.explanation
-                };
-            }
-            
-            // Store alternatives for cycling in single-court mode
-            allRecommendations = response.recommendations || [];
-            recommendationIndex = 0;
-            
-            // Reset exclusion tracking when loading fresh recommendations
-            previouslyExcludedPlayerSets = [];
-        }
-        
-        // Display the recommendations in On Deck section
-        await displayOnDeckRecommendations();
-        
-        // Also display in player selection (legacy)
-        displayRecommendation(recommendationIndex);
-    } catch (error) {
-        console.log('Failed to load recommendations:', error);
-        clearRecommendations();
+        const numActiveCourts = Array.from(qsa('.court-section'))
+            .filter(el => el.style.display !== 'none').length || 1;
+        const data = await api(`./api/scenarios?courts=${numActiveCourts}`);
+        renderScenarioTabs(data.scenarios || {competitive: [], balanced: [], random: []});
+    } catch (err) {
+        console.warn('Failed to load scenarios:', err);
     }
 }
 
-async function displayOnDeckRecommendations() {
-    const container = qs('#onDeckContainer');
-    if (!container) return;
-    
-    // Clear container
-    container.innerHTML = '';
-    
-    if (!currentCourts || currentCourts.length === 0) {
-        container.innerHTML = '<div class="on-deck-empty">No recommendations available</div>';
-        return;
-    }
-    
-    // Fetch current session matches to calculate partner/opponent stats
-    let partnerStats = {};
-    let opponentStats = {};
-    try {
-        const sessionData = await api('./api/sessions/current');
-        const sessionMatches = sessionData.matches || [];
-        
-        // Calculate partner and opponent counts from matches
-        sessionMatches.forEach(match => {
-            const team1 = match.team1 || [];
-            const team2 = match.team2 || [];
-            
-            // Count partnerships (teammates)
-            if (team1.length === 2) {
-                const key1 = `${team1[0]}|${team1[1]}`;
-                const key2 = `${team1[1]}|${team1[0]}`;
-                partnerStats[key1] = (partnerStats[key1] || 0) + 1;
-                partnerStats[key2] = (partnerStats[key2] || 0) + 1;
+/**
+ * Update all court scenario tab labels from the scenarios dict.
+ * scenarios = { competitive: [scenario, ...], balanced: [scenario, ...] }
+ * Each scenario is an array of court matchup objects (index = court position, 0-based).
+ */
+function renderScenarioTabs(scenarios) {
+    currentScenarios = scenarios || {competitive: [], balanced: [], random: []};
+    const modeMap = ['competitive', 'balanced', 'random'];
+
+    for (let courtIdx = 0; courtIdx < 5; courtIdx++) {
+        const courtNum = courtIdx + 1;
+        for (let sIdx = 0; sIdx < modeMap.length; sIdx++) {
+            const matchupEl = qs(`#court-${courtNum}-scenario-${sIdx}-matchup`);
+            if (!matchupEl) continue;
+
+            const mode = modeMap[sIdx];
+            const modeScenario = currentScenarios[mode] || [];
+            const matchup = modeScenario[courtIdx];
+
+            if (!matchup) {
+                matchupEl.textContent = '—';
+                continue;
             }
-            if (team2.length === 2) {
-                const key1 = `${team2[0]}|${team2[1]}`;
-                const key2 = `${team2[1]}|${team2[0]}`;
-                partnerStats[key1] = (partnerStats[key1] || 0) + 1;
-                partnerStats[key2] = (partnerStats[key2] || 0) + 1;
-            }
-            
-            // Count opponents
-            if (team1.length === 2 && team2.length === 2) {
-                for (let p1 of team1) {
-                    for (let p2 of team2) {
-                        const key = `${p1}|${p2}`;
-                        opponentStats[key] = (opponentStats[key] || 0) + 1;
-                    }
-                }
-                for (let p2 of team2) {
-                    for (let p1 of team1) {
-                        const key = `${p2}|${p1}`;
-                        opponentStats[key] = (opponentStats[key] || 0) + 1;
-                    }
-                }
-            }
-        });
-        
-        // Also count partnerships from currently assigned courts
-        for (let courtNum = 1; courtNum <= MAX_COURTS; courtNum++) {
-            const players = courtAssignments[courtNum];
-            if (players && players.length === 4 && players.every(p => p !== null)) {
-                // Team A partnership
-                const teamA = players.slice(0, 2);
-                const keyA1 = `${teamA[0]}|${teamA[1]}`;
-                const keyA2 = `${teamA[1]}|${teamA[0]}`;
-                partnerStats[keyA1] = (partnerStats[keyA1] || 0) + 1;
-                partnerStats[keyA2] = (partnerStats[keyA2] || 0) + 1;
-                
-                // Team B partnership
-                const teamB = players.slice(2, 4);
-                const keyB1 = `${teamB[0]}|${teamB[1]}`;
-                const keyB2 = `${teamB[1]}|${teamB[0]}`;
-                partnerStats[keyB1] = (partnerStats[keyB1] || 0) + 1;
-                partnerStats[keyB2] = (partnerStats[keyB2] || 0) + 1;
-            }
+            const { team1, team2 } = matchup;
+            matchupEl.textContent = `${team1.join(' & ')} vs ${team2.join(' & ')}`;
         }
-    } catch (error) {
-        console.error('Failed to load match stats:', error);
     }
-    
-    // Helper to format count with emojis
-    const formatCount = (count) => {
-        if (count === 0) return '🆕';
-        if (count === 1) return '①';
-        return `×${count}`;
-    };
-    
-    // Helper to build stats text for a matchup
-    const buildStatsText = (teamA, teamB) => {
-        const stats = [];
-        
-        // Partner stats for each team
-        if (teamA.length === 2) {
-            const partnerKey = `${teamA[0]}|${teamA[1]}`;
-            const partnerCount = partnerStats[partnerKey] || 0;
-            stats.push(`${teamA[0]}/${teamA[1]} ${formatCount(partnerCount)}`);
-        }
-        if (teamB.length === 2) {
-            const partnerKey = `${teamB[0]}|${teamB[1]}`;
-            const partnerCount = partnerStats[partnerKey] || 0;
-            stats.push(`${teamB[0]}/${teamB[1]} ${formatCount(partnerCount)}`);
-        }
-        
-        return stats.join(' | ');
-    };
-    
-    // Create a card for each court recommendation
-    currentCourts.forEach((court, idx) => {
-        const courtNum = court.court || (idx + 1);
-        const teamA = court.team_a || [];
-        const teamB = court.team_b || [];
-        const explanation = court.explanation || '';
-        
-        // Calculate win probabilities
-        const mmrA = calcTeamMMR(teamA);
-        const mmrB = calcTeamMMR(teamB);
-        const pA = expectedScore(mmrA, mmrB);
-        const pB = 1 - pA;
-        
-        // Calculate MMR changes for win/loss
-        const mmrAWin = calculateMMRChange(mmrA, mmrB, true);
-        const mmrALoss = calculateMMRChange(mmrA, mmrB, false);
-        const mmrBWin = calculateMMRChange(mmrB, mmrA, true);
-        const mmrBLoss = calculateMMRChange(mmrB, mmrA, false);
-        
-        // Build stats text
-        const statsText = buildStatsText(teamA, teamB);
-        
-        const card = document.createElement('div');
-        card.className = 'on-deck-card';
-        card.dataset.court = courtNum;
-        
-        card.innerHTML = `
-            <div class="on-deck-card-header">
-                <span class="on-deck-court-label">Court ${courtNum}</span>
-                <div style="display: flex; gap: 0.5rem;">
-                    <button type="button" class="btn-on-deck-assign btn btn-secondary btn-small" data-court="${courtNum}" title="Assign to Court ${courtNum}">
-                        Assign
-                    </button>
-                    <button type="button" class="btn-on-deck-cycle" data-court="${courtNum}" title="Cycle Court ${courtNum} recommendation">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 2v6h-6"></path>
-                            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
-                            <path d="M3 22v-6h6"></path>
-                            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            <div class="on-deck-matchup">
-                <div class="on-deck-team-wrapper">
-                    <div class="on-deck-stats">
-                        <span class="on-deck-win-prob">${formatPct(pA)}</span>
-                        <span class="mmr-change mmr-win">${formatMMRChange(mmrAWin)}</span>
-                        <span class="mmr-change mmr-loss">${formatMMRChange(mmrALoss)}</span>
-                    </div>
-                    <div class="on-deck-team on-deck-team-a">
-                        ${teamA.map(p => escapeHtml(p)).join(' & ')}
-                    </div>
-                </div>
-                <span class="on-deck-vs">vs</span>
-                <div class="on-deck-team-wrapper">
-                    <div class="on-deck-stats">
-                        <span class="on-deck-win-prob">${formatPct(pB)}</span>
-                        <span class="mmr-change mmr-win">${formatMMRChange(mmrBWin)}</span>
-                        <span class="mmr-change mmr-loss">${formatMMRChange(mmrBLoss)}</span>
-                    </div>
-                    <div class="on-deck-team on-deck-team-b">
-                        ${teamB.map(p => escapeHtml(p)).join(' & ')}
-                    </div>
-                </div>
-            </div>
-            <div class="on-deck-court-info">
-                ${escapeHtml(statsText)}
-            </div>
-        `;
-        
-        container.appendChild(card);
-    });
-    
-    // Add Assign All button to footer if we have recommendations
-    const onDeckFooter = qs('.on-deck-footer');
-    if (onDeckFooter && currentCourts.length > 0) {
-        // Remove existing Assign All button if it exists
-        const existing = qs('#btn-assign-all-courts');
-        if (existing) existing.remove();
-        
-        // Add Assign All button to footer (bottom right)
-        const assignAllBtn = document.createElement('button');
-        assignAllBtn.type = 'button';
-        assignAllBtn.id = 'btn-assign-all-courts';
-        assignAllBtn.className = 'btn btn-primary';
-        assignAllBtn.title = 'Assign all recommendations to courts';
-        assignAllBtn.textContent = 'Assign All';
-        assignAllBtn.addEventListener('click', assignAllCourts);
-        onDeckFooter.appendChild(assignAllBtn);
-    } else if (onDeckFooter) {
-        // Clear footer if no recommendations
-        onDeckFooter.innerHTML = '';
-    }
-    
-    // Add event handlers for individual cycle buttons
-    qsa('.btn-on-deck-cycle').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const courtNum = parseInt(btn.dataset.court);
-            cycleSingleCourtRecommendation(courtNum);
-        });
-    });
-    
-    // Add event handlers for individual assign buttons
-    qsa('.btn-on-deck-assign').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const courtNum = parseInt(btn.dataset.court);
-            assignCourtRecommendation(courtNum);
-        });
-    });
 }
 
-function displayRecommendation(index) {
-    // Handle both dual-court and single-court modes
-    if (!currentCourts || currentCourts.length === 0) {
-        // Fallback to legacy recommendations
-        if (!allRecommendations || allRecommendations.length === 0) {
-            return;
+/**
+ * Apply scenario scenarioIdx (0=competitive, 1=balanced) to courtNum:
+ * - Looks up the current cycle index for that mode to pick which of the 3 scenarios to use
+ * - Sets courtAssignments for all courts in the paired scenario
+ * - Highlights the selected tab, deselects the other
+ * - Syncs player pill visuals and team name fields
+ */
+function applyScenario(courtNum, scenarioIdx) {
+    const modeMap = ['competitive', 'balanced', 'random'];
+    const mode = modeMap[scenarioIdx] || 'competitive';
+    const scenario = currentScenarios[mode] || [];
+    if (!scenario.length) return;
+
+    // Clear all non-recorded courts first so stale assignments from a previously
+    // larger court count don't bleed into the pill selection.
+    for (let c = 1; c <= MAX_COURTS; c++) {
+        if (courtStates[c] !== 'recorded') {
+            courtAssignments[c] = [];
+            if (courtStates[c] !== 'empty') courtStates[c] = 'empty';
         }
-        const recommendation = allRecommendations[index];
-        currentRecommendation = {
-            teamA: recommendation.team_a,
-            teamB: recommendation.team_b,
-            explanation: recommendation.explanation
-        };
     }
-    
-    // Remove existing recommendation classes from name buttons
-    // BUT preserve court classes for players that are actually assigned to courts
+
+    // Apply ALL courts in this scenario so both courts update together
+    // (scenarios are paired — selecting Competitive on Court 1 implies the Court 2 half too)
+    const scenarioPlayers = [];
+    scenario.forEach((matchup, idx) => {
+        const cNum = idx + 1;
+        if (!matchup) return;
+        const { team1, team2 } = matchup;
+        courtAssignments[cNum] = [...team1, ...team2];
+        courtStates[cNum] = 'active';
+        scenarioPlayers.push(...team1, ...team2);
+    });
+
+    // Set selectedPlayers to exactly the scenario players — do not include recorded
+    // court players, which would cause stale highlights from previous rounds.
+    selectedPlayers = scenarioPlayers;
+
+    // Sync pill selected state
     qsa('.player-name-btn').forEach(btn => {
-        const playerName = btn.dataset.player;
-        let isAssigned = false;
-        
-        // Check if this player is assigned to any court
-        for (let i = 1; i <= MAX_COURTS; i++) {
-            if (courtAssignments[i] && courtAssignments[i].includes(playerName)) {
-                isAssigned = true;
-                break;
-            }
-        }
-        
-        // Only remove classes if player is not assigned to a court
-        if (!isAssigned) {
-            btn.classList.remove('recommend-team-a', 'recommend-team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
-        }
+        const sel = selectedPlayers.includes(btn.dataset.player);
+        btn.classList.toggle('selected', sel);
+        btn.setAttribute('aria-pressed', sel ? 'true' : 'false');
     });
-    
-    // Add recommendation highlights based on current mode
-    // NOTE: Don't add court classes here - only add them when actually assigned
-    if (currentCourts && currentCourts.length > 1) {
-        // Multi-court: highlight N*4 players (without court colors)
-        let explanations = [];
-        
-        currentCourts.forEach((court, idx) => {
-            const courtNum = court.court || (idx + 1);
-            
-            // Team A players for this court
-            court.team_a.forEach(player => {
-                const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-                if (btn && !btn.classList.contains('selected')) {
-                    // Only add recommend class if player is not already assigned to a court
-                    btn.classList.add('recommend-team-a');
-                }
-            });
-            
-            // Team B players for this court
-            court.team_b.forEach(player => {
-                const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-                if (btn && !btn.classList.contains('selected')) {
-                    // Only add recommend class if player is not already assigned to a court
-                    btn.classList.add('recommend-team-b');
-                }
-            });
-            
-            // Collect explanation for this court
-            explanations.push(`Court ${courtNum}: ${court.explanation}`);
-        });
-        
-        // Update explanation with all courts
-        const explanationEl = qs('#recommendation-explanation');
-        if (explanationEl) {
-            explanationEl.innerHTML = explanations.join('<br>');
-        }
-    } else if (currentRecommendation) {
-        // Single-court: highlight 4 players
-        currentRecommendation.teamA.forEach(player => {
-            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-a');
-            }
-        });
-        
-        currentRecommendation.teamB.forEach(player => {
-            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-b');
-            }
-        });
-        
-        // Update explanation text
-        const explanationEl = qs('#recommendation-explanation');
-        if (explanationEl) {
-            explanationEl.textContent = currentRecommendation.explanation;
+
+    // Highlight selected tab on every court (same scenario index for all)
+    for (let c = 1; c <= MAX_COURTS; c++) {
+        for (let s = 0; s < 3; s++) {
+            const tab = qs(`#court-${c}-scenario-${s}`);
+            if (tab) tab.classList.toggle('selected', s === scenarioIdx);
         }
     }
-    
-    // Legacy support for old single-button format
-    qsa('.btn-player-toggle').forEach(btn => {
-        btn.classList.remove('recommend-team-a', 'recommend-team-b');
-    });
-    
-    if (currentRecommendation) {
-        currentRecommendation.teamA.forEach(player => {
-            const btn = Array.from(qsa('.btn-player-toggle')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-a');
-            }
-        });
-        
-        currentRecommendation.teamB.forEach(player => {
-            const btn = Array.from(qsa('.btn-player-toggle')).find(b => b.dataset.player === player);
-            if (btn) {
-                btn.classList.add('recommend-team-b');
-            }
-        });
-    }
+
+    // Sync court watermarks and team name previews
+    applyCourtWatermarksToSelection();
+    updateTeamPreview();
+    updatePlayerButtonStates();
+    saveState();
 }
 
-function clearRecommendations() {
-    currentRecommendation = null;
-    currentCourts = [];
-    currentRecommendedIds = [];
-    allRecommendations = [];
-    recommendationIndex = 0;
-    isDualCourt = false;
-    
-    // Remove all recommendation highlights and court classes from name buttons
-    qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('recommend-team-a', 'recommend-team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
-    });
-    
-    // Legacy support for old single-button format
-    qsa('.btn-player-toggle').forEach(btn => {
-        btn.classList.remove('recommend-team-a', 'recommend-team-b');
-    });
-    
-    // Clear explanation
-    const explanationEl = qs('#recommendation-explanation');
-    if (explanationEl) {
-        explanationEl.textContent = '';
-    }
-    
-    // Clear On Deck display
-    const onDeckContainer = qs('#onDeckContainer');
-    if (onDeckContainer) {
-        onDeckContainer.innerHTML = '';
-    }
-}
-
-// --- On Deck Assign All ---
-function assignAllCourts() {
-    if (!currentCourts || currentCourts.length === 0) return;
-
-    // Assign each recommendation to its respective court
-    currentCourts.forEach((court, idx) => {
-        const courtNum = court.court || (idx + 1);
-        const teamA = court.team_a || [];
-        const teamB = court.team_b || [];
-
-        // Store in courtAssignments
-        courtAssignments[courtNum] = [...teamA, ...teamB];
-        courtStates[courtNum] = 'assigned';
-    });
-
-    // Update player selection to reflect court assignments
-    // (togglePlayerSelection will fire for each player, triggering on-deck refresh)
-    updatePlayerSelectionFromCourts();
-
-    toast('All recommendations assigned to courts');
-}
-
-// --- On Deck Assign Single Court ---
-function assignCourtRecommendation(courtNum) {
-    const court = currentCourts.find(c => (c.court || 0) === courtNum);
-    if (!court) return;
-
-    const teamA = court.team_a || [];
-    const teamB = court.team_b || [];
-
-    // Store in courtAssignments
-    courtAssignments[courtNum] = [...teamA, ...teamB];
-    courtStates[courtNum] = 'assigned';
-
-    // Update player selection to reflect court assignments
-    // (togglePlayerSelection will fire for each player, triggering on-deck refresh)
-    updatePlayerSelectionFromCourts();
-
-    toast(`Court ${courtNum} assigned`);
-}
-
-// --- Update Player Selection from Courts ---
+/**
+ * Rebuild selectedPlayers from courtAssignments, then sync all player pill
+ * visuals (selected state + court-N badge) and refresh the team name fields.
+ */
 function updatePlayerSelectionFromCourts() {
-    // First, clear all court classes from all player buttons
-    qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
-        btn.setAttribute('aria-pressed', 'false');
-    });
-    
-    // Rebuild selectedPlayers from courtAssignments
-    selectedPlayers = [];
-    
-    // Go through courts in order and update player buttons
-    for (let courtNum = 1; courtNum <= 5; courtNum++) {
-        const players = courtAssignments[courtNum];
-        if (players && players.length === 4) {
-            selectedPlayers.push(...players);
-            
-            // Update each player's button with court class and team designation
-            players.forEach((playerName, idx) => {
-                const btn = qs(`.player-name-btn[data-player="${playerName}"]`);
-                if (btn) {
-                    // First 2 players are team-a, last 2 are team-b
-                    const teamClass = idx < 2 ? 'team-a' : 'team-b';
-                    btn.classList.add('selected', `court-${courtNum}`, teamClass);
-                    btn.setAttribute('aria-pressed', 'true');
-                }
+    // Collect players from all courts in court/slot order
+    const newSelected = [];
+    for (let c = 1; c <= MAX_COURTS; c++) {
+        if (courtAssignments[c]) {
+            courtAssignments[c].forEach(p => {
+                if (p && !newSelected.includes(p)) newSelected.push(p);
             });
-            
-            // Update court display for this court
-            const teamAEl = qs(`#court${courtNum}-teamA`);
-            const teamBEl = qs(`#court${courtNum}-teamB`);
-            if (teamAEl && teamBEl) {
-                const teamA = players.slice(0, 2);
-                const teamB = players.slice(2, 4);
-                const mmrA = calcTeamMMR(teamA);
-                const mmrB = calcTeamMMR(teamB);
-                const pA = expectedScore(mmrA, mmrB);
-                const pB = 1 - pA;
-                
-                // Calculate MMR changes for win/loss
-                const mmrAWin = calculateMMRChange(mmrA, mmrB, true);
-                const mmrALoss = calculateMMRChange(mmrA, mmrB, false);
-                const mmrBWin = calculateMMRChange(mmrB, mmrA, true);
-                const mmrBLoss = calculateMMRChange(mmrB, mmrA, false);
-                
-                renderTeamNamesWithProb(teamAEl, teamA, pA, mmrAWin, mmrALoss);
-                renderTeamNamesWithProb(teamBEl, teamB, pB, mmrBWin, mmrBLoss);
-            }
-            
-            // Show court section
-            const courtSection = qs(`#court-${courtNum}-section`);
-            if (courtSection) {
-                courtSection.style.display = 'block';
-            }
-            
-            // Validate the court
-            validateCourt(courtNum);
         }
     }
-    
-    // Update player button states (but don't call updateTeamPreview to avoid conflicts)
+    selectedPlayers = newSelected;
+
+    // Sync pill selected state
+    qsa('.player-name-btn').forEach(btn => {
+        const name = btn.dataset.player;
+        const sel = selectedPlayers.includes(name);
+        btn.classList.toggle('selected', sel);
+        btn.setAttribute('aria-pressed', sel ? 'true' : 'false');
+    });
+
+    // Apply court-N colour badges to pills
+    applyCourtWatermarksToSelection();
+
+    // Refresh the team name fields and win-prob displays
+    updateTeamPreview();
+
+    // Update button disabled states and clear button visibility
     updatePlayerButtonStates();
 
-    // selectedPlayers was updated directly — trigger on-deck refresh so it
-    // sees who is now on court without requiring a manual player toggle
-    clearTimeout(window._onDeckDebounce);
-    window._onDeckDebounce = setTimeout(() => loadRecommendations(), 400);
-}
-
-// Cycle all court recommendations at once
-async function cycleAllCourts() {
-    try {
-        console.log('Cycling all court recommendations');
-        console.log('currentCourts.length:', currentCourts.length);
-        console.log('currentCourts:', currentCourts);
-        console.log('allRecommendations:', allRecommendations);
-        console.log('recommendationIndex:', recommendationIndex);
-        
-        // For single court mode, cycle through the allRecommendations array
-        if (currentCourts.length === 1) {
-            // Check if we have alternatives to cycle through
-            if (!allRecommendations || allRecommendations.length <= 1) {
-                console.log('No alternative recommendations available');
-                toast('No other recommendations available', 'info');
-                return;
-            }
-            
-            // Move to next recommendation in the array
-            recommendationIndex = (recommendationIndex + 1) % allRecommendations.length;
-            console.log('New recommendationIndex:', recommendationIndex);
-            
-            // Get the next recommendation
-            const nextRecommendation = allRecommendations[recommendationIndex];
-            console.log('Next recommendation:', nextRecommendation);
-            
-            // Update state with the new recommendation
-            currentCourts = [{
-                court: 1,
-                team_a: nextRecommendation.team_a,
-                team_b: nextRecommendation.team_b,
-                explanation: nextRecommendation.explanation
-            }];
-            
-            currentRecommendation = {
-                teamA: nextRecommendation.team_a,
-                teamB: nextRecommendation.team_b,
-                explanation: nextRecommendation.explanation
-            };
-            
-            currentRecommendedIds = [...nextRecommendation.team_a, ...nextRecommendation.team_b];
-            
-            // Display the new recommendation
-            await displayOnDeckRecommendations();
-            displayRecommendation(recommendationIndex);
-            
-            // Show which recommendation we're on
-            const total = allRecommendations.length;
-            const current = recommendationIndex + 1;
-            toast(`Showing recommendation ${current} of ${total}`);
-        } else {
-            // Multi-court: reload all recommendations from server
-            await loadRecommendations();
-            toast('Recommendations refreshed');
-        }
-    } catch (error) {
-        console.error('Failed to cycle all courts:', error);
-        toast('Failed to refresh recommendations', 'error');
-    }
-}
-
-// Cycle a single court recommendation - only swap partners within same 4 players
-async function cycleSingleCourtRecommendation(courtNum) {
-    console.log(`Cycling recommendation for court ${courtNum}`);
-    
-    // Find the court in currentCourts (use == for loose comparison in case of string/number mismatch)
-    const courtIndex = currentCourts.findIndex(c => c.court == courtNum);
-    if (courtIndex < 0) {
-        console.error(`Court ${courtNum} not found in currentCourts`);
-        return;
-    }
-    
-    const court = currentCourts[courtIndex];
-    const teamA = [...court.team_a];
-    const teamB = [...court.team_b];
-    
-    // Get all 4 players and SORT for stable combination generation.
-    // Without sorting, the player indices shift after each cycle, causing
-    // the "current" to always land on combo 0 and skip the 3rd option.
-    const allPlayers = [...teamA, ...teamB].sort();
-    
-    // Generate all possible partner combinations (3 total for 4 players)
-    const combinations = [
-        { team_a: [allPlayers[0], allPlayers[1]], team_b: [allPlayers[2], allPlayers[3]] },
-        { team_a: [allPlayers[0], allPlayers[2]], team_b: [allPlayers[1], allPlayers[3]] },
-        { team_a: [allPlayers[0], allPlayers[3]], team_b: [allPlayers[1], allPlayers[2]] }
-    ];
-    
-    // Find current combination index (check both team orientations since
-    // sorted combos may have team_a/team_b swapped relative to the original)
-    let currentIndex = -1;
-    for (let i = 0; i < combinations.length; i++) {
-        const combo = combinations[i];
-        const matchNormal = arraysEqual(combo.team_a, teamA) && arraysEqual(combo.team_b, teamB);
-        const matchSwapped = arraysEqual(combo.team_a, teamB) && arraysEqual(combo.team_b, teamA);
-        if (matchNormal || matchSwapped) {
-            currentIndex = i;
-            break;
+    // Validate all affected courts
+    for (let c = 1; c <= MAX_COURTS; c++) {
+        if (courtAssignments[c] && courtAssignments[c].length > 0) {
+            validateCourt(c);
         }
     }
-    
-    // Move to next combination
-    const nextIndex = (currentIndex + 1) % combinations.length;
-    const nextCombo = combinations[nextIndex];
-    
-    // Update the court with new combination
-    currentCourts[courtIndex] = {
-        court: courtNum,
-        team_a: nextCombo.team_a,
-        team_b: nextCombo.team_b,
-        explanation: `Cycled partners for Court ${courtNum}`
-    };
-    
-    // Re-display On Deck recommendations (await since it fetches stats)
-    await displayOnDeckRecommendations();
-    toast(`Court ${courtNum} partners swapped`);
-}
-
-// Helper function to compare arrays
-function arraysEqual(arr1, arr2) {
-    if (arr1.length !== arr2.length) return false;
-    const sorted1 = [...arr1].sort();
-    const sorted2 = [...arr2].sort();
-    return sorted1.every((val, idx) => val === sorted2[idx]);
-}
-
-// Clear all On Deck recommendations
-function clearAllCourts() {
-    console.log('Clearing all On Deck recommendations');
-    clearRecommendations();
-    toast('Recommendations cleared');
-}
-
-async function cycleRecommendation() {
-    console.log('cycleRecommendation called. isDualCourt:', isDualCourt);
-    
-    if (isDualCourt) {
-        // Multi-court mode: fetch new recommendation (different team arrangement)
-        try {
-            // Don't exclude players in multi-court mode, just fetch a fresh recommendation
-            // The backend will shuffle and generate a different arrangement
-            console.log('Fetching new multi-court recommendations');
-            const response = await api('./api/recommendations');
-            console.log('Got response:', response);
-            
-            // Update state with new recommendations
-            if (response.multi_court || response.dual_court) {
-                currentCourts = response.matchups || [];
-                currentRecommendedIds = response.player_ids || [];
-                console.log('Updated currentCourts:', currentCourts);
-                console.log('Updated currentRecommendedIds:', currentRecommendedIds);
-                
-                if (currentCourts.length > 0) {
-                    currentRecommendation = {
-                        teamA: currentCourts[0].team_a,
-                        teamB: currentCourts[0].team_b,
-                        explanation: currentCourts[0].explanation
-                    };
-                }
-                
-                displayRecommendation(0);
-            } else {
-                // Fallback: backend couldn't provide multi-court (not enough unique players)
-                isDualCourt = false;
-                if (response.team_a && response.team_b) {
-                    currentCourts = [{
-                        court: 1,
-                        team_a: response.team_a,
-                        team_b: response.team_b,
-                        explanation: response.explanation
-                    }];
-                    currentRecommendation = {
-                        teamA: response.team_a,
-                        teamB: response.team_b,
-                        explanation: response.explanation
-                    };
-                    currentRecommendedIds = response.player_ids || [];
-                }
-                displayRecommendation(0);
-                toast('Not enough players for multi-court. Showing single court.', 'info');
-            }
-        } catch (error) {
-            console.error('Failed to cycle recommendations:', error);
-            toast('Failed to load new recommendations', 'error');
-        }
-    } else {
-        // Single-court mode: cycle through alternatives
-        console.log('Single-court cycling. allRecommendations:', allRecommendations);
-        if (!allRecommendations || allRecommendations.length <= 1) {
-            console.log('Not enough recommendations to cycle. Length:', allRecommendations?.length);
-            return;
-        }
-        
-        // Move to next recommendation (wrap around to beginning)
-        recommendationIndex = (recommendationIndex + 1) % allRecommendations.length;
-        console.log('New recommendationIndex:', recommendationIndex);
-        
-        // Update currentRecommendation from the cycled recommendation
-        const recommendation = allRecommendations[recommendationIndex];
-        currentRecommendation = {
-            teamA: recommendation.team_a,
-            teamB: recommendation.team_b,
-            explanation: recommendation.explanation
-        };
-        
-        // Update currentRecommendedIds for the new recommendation
-        currentRecommendedIds = [...recommendation.team_a, ...recommendation.team_b];
-        
-        displayRecommendation(recommendationIndex);
-    }
-}
-
-function setRecommendedMatchup() {
-    console.log('setRecommendedMatchup called');
-    console.log('isDualCourt:', isDualCourt);
-    console.log('currentCourts:', currentCourts);
-    console.log('currentRecommendation:', currentRecommendation);
-    console.log('currentRecommendedIds:', currentRecommendedIds);
-    
-    // Clear current selections
-    selectedPlayers = [];
-    
-    // Clear from name buttons and remove court classes
-    // Also remove any temp-disabled attributes so all buttons are available for selection
-    qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
-        btn.setAttribute('aria-pressed', 'false');
-        // Remove temporary disabled state
-        if (btn.getAttribute('data-temp-disabled') === 'true') {
-            btn.disabled = false;
-            btn.removeAttribute('data-temp-disabled');
-        }
-    });
-    
-    // Legacy support for old single-button format
-    qsa('.btn-player-toggle').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b');
-        btn.disabled = false;
-        btn.setAttribute('aria-pressed', 'false');
-    });
-    
-    if (isDualCourt && currentCourts.length >= 2) {
-        // Multi-court mode: select all N*4 players based on actual court assignments
-        console.log(`Selecting ${currentCourts.length * 4} players for ${currentCourts.length} courts`);
-        
-        // Iterate through each court and assign players based on backend matchup
-        currentCourts.forEach((court, courtIdx) => {
-            const courtNum = court.court || (courtIdx + 1);
-            const courtClass = `court-${courtNum}`;
-            
-            // Add Team A players for this court
-            court.team_a.forEach(player => {
-                const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-                if (btn && !btn.disabled) {
-                    selectedPlayers.push(player);
-                    btn.classList.add('selected', 'team-a', courtClass);
-                    btn.setAttribute('aria-pressed', 'true');
-                }
-            });
-            
-            // Add Team B players for this court
-            court.team_b.forEach(player => {
-                const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-                if (btn && !btn.disabled) {
-                    selectedPlayers.push(player);
-                    btn.classList.add('selected', 'team-b', courtClass);
-                    btn.setAttribute('aria-pressed', 'true');
-                }
-            });
-        });
-    } else if (currentRecommendation) {
-        // Single-court mode: select 4 players directly (don't use togglePlayerSelection)
-        console.log('Selecting 4 players for single-court');
-        const playersToSelect = [...currentRecommendation.teamA, ...currentRecommendation.teamB];
-        console.log('Players to select:', playersToSelect);
-        console.log('Total players to select:', playersToSelect.length);
-        
-        // First, add all players to the array
-        playersToSelect.forEach((player, index) => {
-            console.log(`Adding player ${index + 1}/4:`, player);
-            const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
-            
-            if (!btn) {
-                console.error('Button not found for player:', player);
-                console.log('Available buttons:', Array.from(qsa('.player-name-btn')).map(b => b.dataset.player));
-                return;
-            }
-            
-            if (btn.disabled) {
-                console.warn('Button is disabled for player:', player);
-                console.log('Button disabled attribute:', btn.getAttribute('disabled'));
-                console.log('Button has data-temp-disabled:', btn.getAttribute('data-temp-disabled'));
-                console.log('Currently selected players:', selectedPlayers);
-                console.log('Max selections:', mode2v2 ? 8 : (activePlayersCount >= 8 ? 8 : 4));
-                return;
-            }
-            
-            // Add to selection
-            selectedPlayers.push(player);
-            btn.classList.add('selected');
-            btn.setAttribute('aria-pressed', 'true');
-            
-            // Add team color (0-1 = team A, 2-3 = team B)
-            if (index < 2) {
-                btn.classList.add('team-a');
-            } else {
-                btn.classList.add('team-b');
-            }
-            
-            console.log(`Successfully selected player ${index + 1}:`, player);
-        });
-        
-        console.log('Final selectedPlayers length:', selectedPlayers.length);
-    } else {
-        console.error('No recommendation available!');
-    }
-    
-    console.log('Selected players:', selectedPlayers);
-    
-    // Update UI - NOTE: updatePlayerButtonStates() MUST come AFTER all players are added
-    // Otherwise it may disable buttons during the selection process
-    applyCourtWatermarksToSelection();
-    updateTeamColors();
-    updatePlayerButtonStates();  // Moved after updateTeamColors to ensure all selections are done
-    updateTeamPreview();
-    updateLockButtonVisibility();
-    saveState();
-    validateForm();
 }
 
 // ==================== MMR & Win Probability Helpers ====================
@@ -3620,17 +2843,10 @@ function renderTeamNamesWithProb(containerEl, players, probOrNull, mmrWinOrNull 
         }
     }
     
-    // Clear and update team names container (existing logic)
+    // Clear and update team names container
     containerEl.innerHTML = '';
-    
-    // Format team names
-    if (isMobile) {
-        // Mobile: stack names vertically using div elements
-        containerEl.innerHTML = players.map(name => `<div>${escapeHtml(name)}</div>`).join('');
-    } else {
-        // Desktop: join with &
-        containerEl.textContent = players.join(' & ');
-    }
+    // Always join with & — consistent on both desktop and mobile
+    containerEl.innerHTML = players.map(name => `<span>${escapeHtml(name)}</span>`).join('<span class="team-amp"> &amp; </span>');
 }
 
 function updateTeamPreview() {
@@ -3821,6 +3037,19 @@ function validateForm() {
     if (debugButton) debugButton.textContent = `Button: ${isValid ? 'Enabled' : 'Disabled'}`;
 }
 
+// Select birds count for a court
+function selectBirds(courtNum, value) {
+    selectedBirds[courtNum] = value;
+    qsa(`.btn-bird[data-court="${courtNum}"]`).forEach(b => {
+        b.classList.toggle('selected', parseInt(b.dataset.value) === value);
+    });
+    // Hide custom input and deactivate + button
+    const input = qs(`#court${courtNum}-birdsCustomInput`);
+    const plusBtn = qs(`.btn-bird-plus[data-court="${courtNum}"]`);
+    if (input) { input.style.display = 'none'; input.value = ''; }
+    if (plusBtn) plusBtn.classList.remove('active');
+}
+
 // Validate individual court (for dual-court mode)
 function validateCourt(courtNum) {
     const scoreA = qs(`#court${courtNum}-score-a`);
@@ -3883,7 +3112,8 @@ async function recordCourt(courtNum) {
             team1_score: scoreA,
             team2_score: scoreB,
             game_value: selectedBets[courtNum],
-            player_no_bet_status: playerNoBetStatus
+            player_no_bet_status: playerNoBetStatus,
+            birds_used: selectedBirds[courtNum] !== null ? selectedBirds[courtNum] : undefined,
         };
         
         console.log(`Court ${courtNum} Payload:`, payload);
@@ -3896,7 +3126,7 @@ async function recordCourt(courtNum) {
         
         console.log(`Court ${courtNum} match recorded:`, result);
         toast(`Court ${courtNum} recorded successfully!`);
-        
+
         // Save players before clearing (need this for selectedPlayers cleanup)
         const clearedPlayers = [...courtAssignments[courtNum]];
         
@@ -3924,7 +3154,14 @@ async function recordCourt(courtNum) {
             btn.setAttribute('aria-pressed', betValue === 1 ? 'true' : 'false');
             btn.disabled = false;
         });
-        
+
+        // Reset birds to default 1 for this court
+        const postRecordBirdsInput = qs(`#court${courtNum}-birdsCustomInput`);
+        const postRecordBirdsPlusBtn = qs(`.btn-bird-plus[data-court="${courtNum}"]`);
+        if (postRecordBirdsInput) { postRecordBirdsInput.style.display = 'none'; postRecordBirdsInput.value = ''; }
+        if (postRecordBirdsPlusBtn) postRecordBirdsPlusBtn.classList.remove('active');
+        selectBirds(courtNum, 1);
+
         // Clear team displays
         const teamAEl = qs(`#court${courtNum}-teamA`);
         const teamBEl = qs(`#court${courtNum}-teamB`);
@@ -3952,7 +3189,11 @@ async function recordCourt(courtNum) {
         // Validate the court that was just cleared
         validateCourt(courtNum);
         
-        // Reload data (skip loadRecommendations to preserve current recommendations)
+        // Note: scenarios are intentionally NOT refreshed here so the tabs
+        // keep showing the same options after recording. Scenarios will update
+        // naturally when the player roster changes or the page reloads.
+
+        // Reload data
         await loadMatchHistory();
         await loadSessionStats();
         await loadPlayerEarnings();
@@ -3963,100 +3204,6 @@ async function recordCourt(courtNum) {
     }
 }
 
-// Cycle single court to get new recommendation
-async function cycleSingleCourt(courtNum) {
-    console.log(`cycleSingleCourt called for court ${courtNum}`);
-    
-    try {
-        // Collect existing partnerships from other courts to exclude
-        const existingPartnerships = [];
-        for (let i = 1; i <= 5; i++) {
-            if (i !== courtNum && courtAssignments[i] && courtAssignments[i].length === 4 && courtAssignments[i].every(p => p !== null)) {
-                // Extract the two partnerships (team A and team B)
-                const teamA = courtAssignments[i].slice(0, 2).sort();
-                const teamB = courtAssignments[i].slice(2, 4).sort();
-                existingPartnerships.push(teamA);
-                existingPartnerships.push(teamB);
-            }
-        }
-        
-        // Fetch new recommendation for this court, excluding existing partnerships
-        const queryParams = existingPartnerships.length > 0 
-            ? '?exclude_partnerships=' + encodeURIComponent(JSON.stringify(existingPartnerships))
-            : '';
-        const response = await api(`./api/recommendations/court${queryParams}`);
-        console.log(`Got new recommendation for court ${courtNum}:`, response);
-        
-        if (!response || !response.team_a || !response.team_b) {
-            toast('No recommendation available', 'error');
-            return;
-        }
-        
-        // Get the current players on this court (if any), filtering out vacancies
-        const currentPlayers = (courtAssignments[courtNum] || []).filter(p => p !== null);
-        
-        // Update court assignments with new recommendation
-        const newPlayers = [...response.team_a, ...response.team_b];
-        courtAssignments[courtNum] = newPlayers;
-        courtStates[courtNum] = 'active';
-        
-        // Update team display
-        const teamAEl = qs(`#court${courtNum}-teamA`);
-        const teamBEl = qs(`#court${courtNum}-teamB`);
-        
-        if (teamAEl && teamBEl) {
-            // Calculate win probabilities
-            const mmrA = calcTeamMMR(response.team_a);
-            const mmrB = calcTeamMMR(response.team_b);
-            const pA = expectedScore(mmrA, mmrB);
-            const pB = 1 - pA;
-            
-            renderTeamNamesWithProb(teamAEl, response.team_a, pA);
-            renderTeamNamesWithProb(teamBEl, response.team_b, pB);
-        }
-        
-        // Clear previous player selection for this court and add new ones
-        // Remove old players from selectedPlayers
-        currentPlayers.forEach(player => {
-            const index = selectedPlayers.indexOf(player);
-            if (index > -1) {
-                selectedPlayers.splice(index, 1);
-            }
-            
-            // Clear visual state from old players
-            const btn = qs(`.player-name-btn[data-player="${player}"]`);
-            if (btn) {
-                btn.classList.remove('selected', 'team-a', 'team-b', `court-${courtNum}`);
-                btn.setAttribute('aria-pressed', 'false');
-            }
-        });
-        
-        // Add new players to selectedPlayers and update visual state
-        newPlayers.forEach((player, idx) => {
-            if (!selectedPlayers.includes(player)) {
-                selectedPlayers.push(player);
-            }
-            
-            const btn = qs(`.player-name-btn[data-player="${player}"]`);
-            if (btn) {
-                const teamClass = idx < 2 ? 'team-a' : 'team-b';
-                btn.classList.add('selected', teamClass, `court-${courtNum}`);
-                btn.setAttribute('aria-pressed', 'true');
-            }
-        });
-        
-        // Validate this court
-        validateCourt(courtNum);
-        
-        // Update button states
-        updatePlayerButtonStates();
-        
-        console.log(`Court ${courtNum} cycled successfully`);
-    } catch (error) {
-        console.error(`Error cycling court ${courtNum}:`, error);
-        toast(error.message || `Failed to get recommendation for court ${courtNum}`, 'error');
-    }
-}
 
 // Clear recorded court to allow re-recording
 function clearCourt(courtNum) {
@@ -4124,7 +3271,14 @@ function clearCourt(courtNum) {
         btn.classList.remove('selected');
         btn.setAttribute('aria-pressed', 'false');
     });
-    
+
+    // Reset birds to default 1
+    const birdsCustomInput = qs(`#court${courtNum}-birdsCustomInput`);
+    const birdsPlusBtn = qs(`.btn-bird-plus[data-court="${courtNum}"]`);
+    if (birdsCustomInput) { birdsCustomInput.style.display = 'none'; birdsCustomInput.value = ''; }
+    if (birdsPlusBtn) birdsPlusBtn.classList.remove('active');
+    selectBirds(courtNum, 1);
+
     // Show record button and hide clear button
     const recordBtn = qs(`#recordCourt${courtNum}Btn`);
     const clearBtn = qs(`#clearCourt${courtNum}Btn`);
@@ -4451,13 +3605,12 @@ async function handleRecordMatch() {
         console.log('Resetting form...');
         resetMatchForm();
         
-        // Reload data and refresh on-deck recommendations based on new game history
+        // Reload data (scenarios stay unchanged — they'll refresh on next player roster change)
         console.log('Reloading data...');
         await loadMatchHistory();
         await loadSessionStats();
         await loadPlayerEarnings();
         await loadSessionLogs();
-        await loadRecommendations();
         console.log('All done!');
     } catch (error) {
         console.error('Error recording match:', error);
@@ -4470,7 +3623,7 @@ function resetMatchForm() {
     // Clear player selection
     selectedPlayers = [];
 
-    // Clear court assignments so on-deck reloads with clean state
+    // Clear court assignments so scenarios reload with clean state
     for (let i = 1; i <= MAX_COURTS; i++) {
         courtAssignments[i] = [];
         courtStates[i] = 'empty';
@@ -4585,7 +3738,7 @@ async function loadMatchHistory() {
         // Update session display
         updateSessionDisplay();
         
-        const colspanCount = isAdmin() ? 6 : 5;
+        const colspanCount = isAdmin() ? 7 : 6;
         
         if (matches.length === 0) {
             // Update empty row colspan
@@ -4634,6 +3787,7 @@ async function loadMatchHistory() {
                     <td class="col-score" style="text-align: center;">${scoreDisplay}</td>
                     <td class="${team2Class}">${renderTeam(match.team2)}</td>
                     <td class="col-bet" style="text-align: right;">${formatCurrency(match.game_value)}</td>
+                    <td class="col-birds" style="text-align: center;">${match.birds_used != null ? match.birds_used : '—'}</td>
                     ${isAdmin() ? `<td class="col-action" style="text-align: center;">
                         <button class="btn btn-danger btn-small" onclick="deleteMatchFromHistory('${match.match_id}')" title="Delete match">
                             ×

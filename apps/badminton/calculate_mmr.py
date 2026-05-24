@@ -1,14 +1,14 @@
 """
-MMR Calculation Script
+MMR Calculation Script — DEPRECATED
 
-This script recalculates all player MMR ratings from historical match data
-and updates the players.json file with the new ratings.
+This script operated on the legacy players.json / matches.json files which no
+longer exist. Use recalculate_mmr_db.py instead, which reads from and writes
+to the SQLite database.
 
-Usage:
-    python calculate_mmr.py --write
-    python calculate_mmr.py --dry-run
-    python calculate_mmr.py --write --history data/mmr_history.json
-    python calculate_mmr.py --write --k-factor 32
+    python recalculate_mmr_db.py        # dry-run
+    python recalculate_mmr_db.py --yes  # apply changes
+
+This file is kept for historical reference only.
 """
 
 import json

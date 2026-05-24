@@ -47,45 +47,8 @@
             </div>
         </div>
         
-        <!-- Teams & Bet Stacked Layout -->
+        <!-- Courts Container -->
         <div class="teams-bet-row" id="teamPreview">
-            <!-- On Deck Recommendations Section -->
-            <div class="on-deck-section" id="onDeckSection">
-                <div class="on-deck-header">
-                    <h3>⏭️ On Deck </h3>
-                    <div class="on-deck-actions">
-                        <button type="button" id="btn-cycle-all-courts" class="btn btn-secondary btn-small" title="Cycle all court recommendations">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M21 2v6h-6"></path>
-                                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
-                                <path d="M3 22v-6h6"></path>
-                                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
-                            </svg>
-                            Cycle All
-                        </button>
-                        <button type="button" id="btn-clear-all-courts" class="btn btn-secondary btn-small" title="Clear all court recommendations">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                <line x1="6" y1="6" x2="18" y2="18"></line>
-                            </svg>
-                            Clear All
-                        </button>
-                    </div>
-                    <button type="button" id="btn-on-deck-minimize" class="btn-on-deck-minimize" title="Minimize On Deck">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polyline points="6 9 12 15 18 9"></polyline>
-                        </svg>
-                    </button>
-                </div>
-                <div id="onDeckContainer" class="on-deck-container">
-                    <!-- Recommendation cards rendered by JavaScript -->
-                </div>
-                <div class="on-deck-footer">
-                    <!-- Assign All button will be added here by JavaScript -->
-                </div>
-            </div>
-            
-            <!-- Courts Container -->
             <div id="courts-container">
                 <!-- Court 1 Section -->
                 <div class="court-section" id="court-1-section" data-court="1" data-state="empty">
@@ -101,7 +64,22 @@
                             <span class="court-status" id="court-1-status"></span>
                         </div>
                     </div>
-                    
+
+                    <div class="court-scenario-tabs" id="court-1-scenario-tabs">
+                        <button type="button" class="btn-scenario-tab" id="court-1-scenario-0" data-court="1" data-scenario-idx="0" data-mode="competitive">
+                            <span class="scenario-label">⚔ Competitive</span>
+                            <span class="scenario-matchup" id="court-1-scenario-0-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-1-scenario-1" data-court="1" data-scenario-idx="1" data-mode="balanced">
+                            <span class="scenario-label">⚖ Balanced</span>
+                            <span class="scenario-matchup" id="court-1-scenario-1-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-1-scenario-2" data-court="1" data-scenario-idx="2" data-mode="random">
+                            <span class="scenario-label">🎲 Random</span>
+                            <span class="scenario-matchup" id="court-1-scenario-2-matchup">—</span>
+                        </button>
+                    </div>
+
                     <div class="court-row" id="court-1-row" data-court="1">
                         <div class="team team-a" data-team="a">
                             <div class="team-names" id="court1-teamA"></div>
@@ -113,7 +91,22 @@
                             <div class="team-names" id="court1-teamB"></div>
                         </div>
                     </div>
-                    
+
+                    <div class="court-score-row">
+                        <div class="score-preset-group score-preset-group--a">
+                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="19">21-19</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="18">21-18</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="16">21-16</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="15">21-15</button>
+                        </div>
+                        <div class="score-preset-group score-preset-group--b">
+                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="19">19-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="18">18-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="16">16-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="15">15-21</button>
+                        </div>
+                    </div>
+
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court1-betButtons">
                             <button type="button" class="btn-bet" data-court="1" data-value="0">$0</button>
@@ -124,7 +117,18 @@
                             <button type="button" class="btn-bet" data-court="1" data-value="5">$5</button>
                         </div>
                     </div>
-                    
+
+                    <div class="court-birds-row">
+                        <span class="birds-label">🐦</span>
+                        <div class="birds-button-group" id="court1-birdsButtons">
+                            <button type="button" class="btn-bird" data-court="1" data-value="1">1</button>
+                            <button type="button" class="btn-bird" data-court="1" data-value="2">2</button>
+                            <button type="button" class="btn-bird" data-court="1" data-value="3">3</button>
+                            <button type="button" class="btn-bird-plus" data-court="1" title="Enter custom amount">+</button>
+                            <input type="number" class="birds-custom-input" id="court1-birdsCustomInput" data-court="1" min="1" max="99" placeholder="#" style="display:none;">
+                        </div>
+                    </div>
+
                     <div class="court-actions">
                         <button class="btn btn-primary record-court-btn" id="recordCourt1Btn" data-court="1" disabled>Record Court 1</button>
                     </div>
@@ -144,7 +148,22 @@
                             <span class="court-status" id="court-2-status"></span>
                         </div>
                     </div>
-                    
+
+                    <div class="court-scenario-tabs" id="court-2-scenario-tabs">
+                        <button type="button" class="btn-scenario-tab" id="court-2-scenario-0" data-court="2" data-scenario-idx="0" data-mode="competitive">
+                            <span class="scenario-label">⚔ Competitive</span>
+                            <span class="scenario-matchup" id="court-2-scenario-0-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-2-scenario-1" data-court="2" data-scenario-idx="1" data-mode="balanced">
+                            <span class="scenario-label">⚖ Balanced</span>
+                            <span class="scenario-matchup" id="court-2-scenario-1-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-2-scenario-2" data-court="2" data-scenario-idx="2" data-mode="random">
+                            <span class="scenario-label">🎲 Random</span>
+                            <span class="scenario-matchup" id="court-2-scenario-2-matchup">—</span>
+                        </button>
+                    </div>
+
                     <div class="court-row" id="court-2-row" data-court="2">
                         <div class="team team-a" data-team="a">
                             <div class="team-names" id="court2-teamA"></div>
@@ -156,7 +175,22 @@
                             <div class="team-names" id="court2-teamB"></div>
                         </div>
                     </div>
-                    
+
+                    <div class="court-score-row">
+                        <div class="score-preset-group score-preset-group--a">
+                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="19">21-19</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="18">21-18</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="16">21-16</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="15">21-15</button>
+                        </div>
+                        <div class="score-preset-group score-preset-group--b">
+                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="19">19-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="18">18-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="16">16-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="15">15-21</button>
+                        </div>
+                    </div>
+
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court2-betButtons">
                             <button type="button" class="btn-bet" data-court="2" data-value="0">$0</button>
@@ -167,7 +201,18 @@
                             <button type="button" class="btn-bet" data-court="2" data-value="5">$5</button>
                         </div>
                     </div>
-                    
+
+                    <div class="court-birds-row">
+                        <span class="birds-label">🐦</span>
+                        <div class="birds-button-group" id="court2-birdsButtons">
+                            <button type="button" class="btn-bird" data-court="2" data-value="1">1</button>
+                            <button type="button" class="btn-bird" data-court="2" data-value="2">2</button>
+                            <button type="button" class="btn-bird" data-court="2" data-value="3">3</button>
+                            <button type="button" class="btn-bird-plus" data-court="2" title="Enter custom amount">+</button>
+                            <input type="number" class="birds-custom-input" id="court2-birdsCustomInput" data-court="2" min="1" max="99" placeholder="#" style="display:none;">
+                        </div>
+                    </div>
+
                     <div class="court-actions">
                         <button class="btn btn-primary record-court-btn" id="recordCourt2Btn" data-court="2" disabled>Record Court 2</button>
                     </div>
@@ -187,7 +232,22 @@
                             <span class="court-status" id="court-3-status"></span>
                         </div>
                     </div>
-                    
+
+                    <div class="court-scenario-tabs" id="court-3-scenario-tabs">
+                        <button type="button" class="btn-scenario-tab" id="court-3-scenario-0" data-court="3" data-scenario-idx="0" data-mode="competitive">
+                            <span class="scenario-label">⚔ Competitive</span>
+                            <span class="scenario-matchup" id="court-3-scenario-0-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-3-scenario-1" data-court="3" data-scenario-idx="1" data-mode="balanced">
+                            <span class="scenario-label">⚖ Balanced</span>
+                            <span class="scenario-matchup" id="court-3-scenario-1-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-3-scenario-2" data-court="3" data-scenario-idx="2" data-mode="random">
+                            <span class="scenario-label">🎲 Random</span>
+                            <span class="scenario-matchup" id="court-3-scenario-2-matchup">—</span>
+                        </button>
+                    </div>
+
                     <div class="court-row" id="court-3-row" data-court="3">
                         <div class="team team-a" data-team="a">
                             <div class="team-names" id="court3-teamA"></div>
@@ -199,7 +259,22 @@
                             <div class="team-names" id="court3-teamB"></div>
                         </div>
                     </div>
-                    
+
+                    <div class="court-score-row">
+                        <div class="score-preset-group score-preset-group--a">
+                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="19">21-19</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="18">21-18</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="16">21-16</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="15">21-15</button>
+                        </div>
+                        <div class="score-preset-group score-preset-group--b">
+                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="19">19-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="18">18-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="16">16-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="15">15-21</button>
+                        </div>
+                    </div>
+
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court3-betButtons">
                             <button type="button" class="btn-bet" data-court="3" data-value="0">$0</button>
@@ -210,7 +285,18 @@
                             <button type="button" class="btn-bet" data-court="3" data-value="5">$5</button>
                         </div>
                     </div>
-                    
+
+                    <div class="court-birds-row">
+                        <span class="birds-label">🐦</span>
+                        <div class="birds-button-group" id="court3-birdsButtons">
+                            <button type="button" class="btn-bird" data-court="3" data-value="1">1</button>
+                            <button type="button" class="btn-bird" data-court="3" data-value="2">2</button>
+                            <button type="button" class="btn-bird" data-court="3" data-value="3">3</button>
+                            <button type="button" class="btn-bird-plus" data-court="3" title="Enter custom amount">+</button>
+                            <input type="number" class="birds-custom-input" id="court3-birdsCustomInput" data-court="3" min="1" max="99" placeholder="#" style="display:none;">
+                        </div>
+                    </div>
+
                     <div class="court-actions">
                         <button class="btn btn-primary record-court-btn" id="recordCourt3Btn" data-court="3" disabled>Record Court 3</button>
                     </div>
@@ -230,7 +316,22 @@
                             <span class="court-status" id="court-4-status"></span>
                         </div>
                     </div>
-                    
+
+                    <div class="court-scenario-tabs" id="court-4-scenario-tabs">
+                        <button type="button" class="btn-scenario-tab" id="court-4-scenario-0" data-court="4" data-scenario-idx="0" data-mode="competitive">
+                            <span class="scenario-label">⚔ Competitive</span>
+                            <span class="scenario-matchup" id="court-4-scenario-0-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-4-scenario-1" data-court="4" data-scenario-idx="1" data-mode="balanced">
+                            <span class="scenario-label">⚖ Balanced</span>
+                            <span class="scenario-matchup" id="court-4-scenario-1-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-4-scenario-2" data-court="4" data-scenario-idx="2" data-mode="random">
+                            <span class="scenario-label">🎲 Random</span>
+                            <span class="scenario-matchup" id="court-4-scenario-2-matchup">—</span>
+                        </button>
+                    </div>
+
                     <div class="court-row" id="court-4-row" data-court="4">
                         <div class="team team-a" data-team="a">
                             <div class="team-names" id="court4-teamA"></div>
@@ -242,7 +343,22 @@
                             <div class="team-names" id="court4-teamB"></div>
                         </div>
                     </div>
-                    
+
+                    <div class="court-score-row">
+                        <div class="score-preset-group score-preset-group--a">
+                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="19">21-19</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="18">21-18</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="16">21-16</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="15">21-15</button>
+                        </div>
+                        <div class="score-preset-group score-preset-group--b">
+                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="19">19-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="18">18-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="16">16-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="15">15-21</button>
+                        </div>
+                    </div>
+
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court4-betButtons">
                             <button type="button" class="btn-bet" data-court="4" data-value="0">$0</button>
@@ -253,7 +369,18 @@
                             <button type="button" class="btn-bet" data-court="4" data-value="5">$5</button>
                         </div>
                     </div>
-                    
+
+                    <div class="court-birds-row">
+                        <span class="birds-label">🐦</span>
+                        <div class="birds-button-group" id="court4-birdsButtons">
+                            <button type="button" class="btn-bird" data-court="4" data-value="1">1</button>
+                            <button type="button" class="btn-bird" data-court="4" data-value="2">2</button>
+                            <button type="button" class="btn-bird" data-court="4" data-value="3">3</button>
+                            <button type="button" class="btn-bird-plus" data-court="4" title="Enter custom amount">+</button>
+                            <input type="number" class="birds-custom-input" id="court4-birdsCustomInput" data-court="4" min="1" max="99" placeholder="#" style="display:none;">
+                        </div>
+                    </div>
+
                     <div class="court-actions">
                         <button class="btn btn-primary record-court-btn" id="recordCourt4Btn" data-court="4" disabled>Record Court 4</button>
                     </div>
@@ -273,7 +400,22 @@
                             <span class="court-status" id="court-5-status"></span>
                         </div>
                     </div>
-                    
+
+                    <div class="court-scenario-tabs" id="court-5-scenario-tabs">
+                        <button type="button" class="btn-scenario-tab" id="court-5-scenario-0" data-court="5" data-scenario-idx="0" data-mode="competitive">
+                            <span class="scenario-label">⚔ Competitive</span>
+                            <span class="scenario-matchup" id="court-5-scenario-0-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-5-scenario-1" data-court="5" data-scenario-idx="1" data-mode="balanced">
+                            <span class="scenario-label">⚖ Balanced</span>
+                            <span class="scenario-matchup" id="court-5-scenario-1-matchup">—</span>
+                        </button>
+                        <button type="button" class="btn-scenario-tab" id="court-5-scenario-2" data-court="5" data-scenario-idx="2" data-mode="random">
+                            <span class="scenario-label">🎲 Random</span>
+                            <span class="scenario-matchup" id="court-5-scenario-2-matchup">—</span>
+                        </button>
+                    </div>
+
                     <div class="court-row" id="court-5-row" data-court="5">
                         <div class="team team-a" data-team="a">
                             <div class="team-names" id="court5-teamA"></div>
@@ -285,7 +427,22 @@
                             <div class="team-names" id="court5-teamB"></div>
                         </div>
                     </div>
-                    
+
+                    <div class="court-score-row">
+                        <div class="score-preset-group score-preset-group--a">
+                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="19">21-19</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="18">21-18</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="16">21-16</button>
+                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="15">21-15</button>
+                        </div>
+                        <div class="score-preset-group score-preset-group--b">
+                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="19">19-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="18">18-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="16">16-21</button>
+                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="15">15-21</button>
+                        </div>
+                    </div>
+
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court5-betButtons">
                             <button type="button" class="btn-bet" data-court="5" data-value="0">$0</button>
@@ -296,7 +453,18 @@
                             <button type="button" class="btn-bet" data-court="5" data-value="5">$5</button>
                         </div>
                     </div>
-                    
+
+                    <div class="court-birds-row">
+                        <span class="birds-label">🐦</span>
+                        <div class="birds-button-group" id="court5-birdsButtons">
+                            <button type="button" class="btn-bird" data-court="5" data-value="1">1</button>
+                            <button type="button" class="btn-bird" data-court="5" data-value="2">2</button>
+                            <button type="button" class="btn-bird" data-court="5" data-value="3">3</button>
+                            <button type="button" class="btn-bird-plus" data-court="5" title="Enter custom amount">+</button>
+                            <input type="number" class="birds-custom-input" id="court5-birdsCustomInput" data-court="5" min="1" max="99" placeholder="#" style="display:none;">
+                        </div>
+                    </div>
+
                     <div class="court-actions">
                         <button class="btn btn-primary record-court-btn" id="recordCourt5Btn" data-court="5" disabled>Record Court 5</button>
                     </div>
@@ -363,12 +531,13 @@
                                         <th class="col-score" style="width: 80px; text-align: center;">Score</th>
                                         <th class="col-team-b">Team B</th>
                                         <th class="col-bet" style="width: 80px; text-align: right;">Bet</th>
+                                        <th class="col-birds" style="width: 50px; text-align: center;">🐦</th>
                                         <th id="matchupsActionsHeader" class="col-action" style="width: 80px; text-align: center;">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="matchHistoryBody">
                                     <tr id="matchHistoryEmptyRow">
-                                        <td colspan="6" class="table-empty">No matches in today's session yet</td>
+                                        <td colspan="7" class="table-empty">No matches in today's session yet</td>
                                     </tr>
                                 </tbody>
                             </table>

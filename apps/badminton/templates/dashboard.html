@@ -28,19 +28,60 @@
     </div>
 </div>
 
-<!-- Monthly Earnings - Current Month -->
-<div class="card" id="currentMonthCard">
-    <div class="card-header" id="currentMonthHeader">Current Month</div>
-    <div class="session-earnings-mini" id="currentMonthList">
-        <div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">Loading earnings...</div>
+<!-- Earnings Filter + Table -->
+<div class="section-header">
+    <h2>Earnings</h2>
+</div>
+<div class="card">
+    <div class="earnings-year-row" id="dashEarningsYearRow">
+        <!-- Populated by JS -->
+    </div>
+    <div class="earnings-month-row" id="dashEarningsMonthRow">
+        <!-- Populated by JS -->
+    </div>
+    <p class="earnings-range-label" id="dashEarningsRangeLabel"></p>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Player</th>
+                    <th style="width: 70px; text-align: center;">Games</th>
+                    <th style="width: 100px; text-align: right;">Net</th>
+                </tr>
+            </thead>
+            <tbody id="dashEarningsTableBody">
+                <tr><td colspan="3" class="table-empty">Loading...</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
-<!-- Monthly Earnings - Last Month -->
-<div class="card" id="lastMonthCard">
-    <div class="card-header" id="lastMonthHeader">Last Month</div>
-    <div class="session-earnings-mini" id="lastMonthList">
-        <div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">Loading earnings...</div>
+<!-- MMR Movers This Month -->
+<div class="section-header">
+    <h2>MMR Movers <span class="section-header-sub" id="mmrMoversMonthLabel"></span></h2>
+</div>
+<div class="card" id="mmrMoversCard">
+    <div id="mmrMoversList">
+        <div class="loading">Loading...</div>
+    </div>
+</div>
+
+<!-- MMR Timeline Chart -->
+<div class="section-header">
+    <h2>MMR Timeline <span class="section-header-sub">last 6 months</span></h2>
+</div>
+<div class="card chart-card">
+    <canvas id="mmrChart"></canvas>
+    <div id="mmrChartEmpty" class="loading" style="display:none;">Not enough data to plot timeline</div>
+</div>
+
+<!-- Top Partnerships -->
+<div class="section-header">
+    <h2>Top Partnerships</h2>
+</div>
+<div class="card" id="partnershipsCard">
+    <div id="partnershipsList">
+        <div class="loading">Loading...</div>
     </div>
 </div>
 
@@ -65,13 +106,26 @@
     </div>
 </div>
 
-<!-- MMR Leaderboard -->
+<!-- Player Leaderboard -->
 <div class="section-header">
-    <h2>Player MMR Leaderboard</h2>
+    <h2>Player Leaderboard</h2>
 </div>
-<div class="card leaderboard-card">
-    <div class="leaderboard" id="leaderboard">
-        <div class="loading">Loading leaderboard...</div>
+<div class="card">
+    <div class="table-container">
+        <table class="table" id="leaderboardTable">
+            <thead>
+                <tr>
+                    <th style="width: 2rem;">#</th>
+                    <th>Player</th>
+                    <th class="lb-sort-col" data-col="winrate" style="width: 280px; cursor: pointer; user-select: none;">Win Rate <span class="lb-sort-indicator"></span></th>
+                    <th class="lb-sort-col" data-col="mmr" style="width: 80px; text-align: right; cursor: pointer; user-select: none;">MMR <span class="lb-sort-indicator">↓</span></th>
+                    <th class="lb-sort-col" data-col="earnings" style="width: 110px; text-align: right; cursor: pointer; user-select: none;">Earnings <span class="lb-sort-indicator"></span></th>
+                </tr>
+            </thead>
+            <tbody id="leaderboardBody">
+                <tr><td colspan="5" class="table-empty">Loading...</td></tr>
+            </tbody>
+        </table>
     </div>
 </div>
 
@@ -83,7 +137,7 @@
         margin-bottom: 1.5rem;
         max-width: 350px;
     }
-    
+
     .lobby-stats-grid .stat-card {
         background-color: var(--gm-700);
         padding: 0.75rem;
@@ -96,7 +150,7 @@
         align-items: center;
         text-align: center;
     }
-    
+
     .lobby-stats-grid .stat-value {
         font-size: 1.5rem;
         font-weight: 800;
@@ -105,7 +159,7 @@
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         margin-bottom: 0.25rem;
     }
-    
+
     .lobby-stats-grid .stat-label {
         color: var(--dg-500);
         font-size: 0.65rem;
@@ -115,18 +169,25 @@
         line-height: 1.1;
         text-shadow: 0 0 8px rgba(64, 145, 108, 0.4);
     }
-    
+
     .section-header {
         margin: 2rem 0 0.75rem 0;
     }
-    
+
     .section-header h2 {
         margin: 0;
         color: var(--text);
         font-size: 1.5rem;
         font-weight: 600;
     }
-    
+
+    .section-header-sub {
+        font-size: 0.85rem;
+        font-weight: 400;
+        color: var(--text-muted);
+        margin-left: 0.4rem;
+    }
+
     .leaderboard-card {
         background-color: var(--gm-800);
         border-radius: 8px;
@@ -135,11 +196,11 @@
         margin-bottom: 1.5rem;
         overflow: hidden;
     }
-    
+
     .leaderboard {
         padding: 0;
     }
-    
+
     .leaderboard-item {
         display: flex;
         justify-content: space-between;
@@ -148,22 +209,28 @@
         border-bottom: 1px solid var(--gm-700);
         transition: background-color 0.2s;
     }
-    
+
     .leaderboard-item:hover {
         background-color: rgba(64, 145, 108, 0.1);
     }
-    
+
     .leaderboard-item:last-child {
         border-bottom: none;
     }
-    
+
+    .leaderboard-item--link {
+        text-decoration: none;
+        color: inherit;
+        cursor: pointer;
+    }
+
     .leaderboard-rank {
         font-size: 1rem;
         font-weight: bold;
         color: var(--text-muted);
         min-width: 30px;
     }
-    
+
     .leaderboard-name {
         font-weight: 600;
         color: var(--text);
@@ -171,44 +238,187 @@
         flex: 1;
         margin-left: 1rem;
     }
-    
+
     .leaderboard-mmr {
         font-size: 1rem;
         font-weight: bold;
         color: var(--dg-500);
     }
-    
+
     .loading {
         text-align: center;
         color: var(--text-muted);
         padding: 1rem;
         font-style: italic;
     }
-    
-    .session-earnings-mini {
-        padding: 0.75rem 1rem;
-    }
-    
-    .session-earnings-item {
-        display: flex;
-        justify-content: space-between;
-        padding: 0.5rem 0;
-        border-bottom: 1px solid var(--gm-700);
-    }
-    
-    .session-earnings-item:last-child {
-        border-bottom: none;
-    }
-    
+
     .earnings-positive {
-        color: var(--ok);
+        color: #4ade80;
+        font-weight: 600;
     }
-    
+
     .earnings-negative {
         color: var(--danger);
+        font-weight: 600;
+    }
+
+    .player-link {
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .player-link:hover {
+        text-decoration: underline;
+        color: var(--dg-500);
+    }
+
+    /* MMR Movers */
+    .mmr-movers-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .mmr-movers-table th {
+        text-align: left;
+        padding: 0.5rem 1rem;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--gm-700);
+    }
+
+    .mmr-movers-table th.right,
+    .mmr-movers-table td.right {
+        text-align: right;
+    }
+
+    .mmr-movers-table th.center,
+    .mmr-movers-table td.center {
+        text-align: center;
+    }
+
+    .mmr-movers-table td {
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+        border-bottom: 1px solid var(--gm-700);
+        color: var(--text);
+    }
+
+    .mmr-movers-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    @media (max-width: 480px) {
+        .mmr-movers-before {
+            display: none;
+        }
+    }
+
+    .mmr-change-cell {
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+
+    /* Partnerships table */
+    .partnerships-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .partnerships-table th {
+        text-align: left;
+        padding: 0.5rem 1rem;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        border-bottom: 1px solid var(--gm-700);
+    }
+
+    .partnerships-table th.right,
+    .partnerships-table td.right {
+        text-align: right;
+    }
+
+    .partnerships-table th.center,
+    .partnerships-table td.center {
+        text-align: center;
+    }
+
+    .partnerships-table td {
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+        border-bottom: 1px solid var(--gm-700);
+        color: var(--text);
+    }
+
+    .partnerships-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .partnership-rank {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        margin-right: 0.4rem;
+    }
+
+    .partnerships-toggle {
+        padding: 0.75rem 1rem;
+        border-top: 1px solid var(--gm-700);
+    }
+
+    /* Leaderboard table layout */
+    #leaderboardTable {
+        table-layout: auto;
+        width: 100%;
+    }
+
+    #leaderboardTable th,
+    #leaderboardTable td {
+        white-space: nowrap;
+    }
+
+    .lb-winrate-number {
+        display: none;
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+
+    @media (max-width: 480px) {
+        .lb-winrate-bar {
+            display: none;
+        }
+        .lb-winrate-number {
+            display: inline;
+        }
+    }
+
+    /* Leaderboard table sort */
+    .lb-sort-col:hover {
+        color: var(--dg-500);
+    }
+
+    .lb-sort-col.lb-active {
+        color: var(--dg-500);
+    }
+
+    .lb-sort-indicator {
+        font-size: 0.75rem;
+        margin-left: 0.2rem;
+    }
+
+    /* Chart */
+    .chart-card {
+        padding: 1rem;
+    }
+
+    #mmrChart {
+        max-height: 300px;
     }
 </style>
 
+<script src="/badminton/static/js/chart.umd.min.js"></script>
 <script>
     // Utility functions
     function escapeHtml(unsafe) {
@@ -219,11 +429,11 @@
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
     }
-    
+
     function formatEarnings(amount) {
         const absAmount = Math.abs(Number(amount));
         const formatted = absAmount.toFixed(2);
-        
+
         if (amount > 0) {
             return { text: `+$${formatted}`, className: 'earnings-positive' };
         } else if (amount < 0) {
@@ -232,14 +442,14 @@
             return { text: `$${formatted}`, className: '' };
         }
     }
-    
+
     function formatSignedInt(value) {
         const n = Math.round(Number(value) || 0);
         if (n > 0) return '+' + n;
         if (n < 0) return String(n);
         return '0';
     }
-    
+
     function formatDateDesign(dateStr) {
         try {
             let date;
@@ -249,19 +459,19 @@
             } else {
                 date = new Date(dateStr);
             }
-            
+
             if (isNaN(date.getTime())) {
                 return escapeHtml(dateStr || '—');
             }
-            
+
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
-            
+
             const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             const dow = days[date.getDay()];
             const ariaLabel = `${dow} ${year}-${month}-${day}`;
-            
+
             return `<div class="date-design" role="group" aria-label="${ariaLabel}">
                 <div class="date-design__dow">${dow}</div>
                 <div class="date-design__date">
@@ -273,7 +483,7 @@
             return escapeHtml(dateStr || '—');
         }
     }
-    
+
     function getTodayLocalDate() {
         const now = new Date();
         const year = now.getFullYear();
@@ -281,7 +491,7 @@
         const day = String(now.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
     }
-    
+
     async function loadLobbyStats() {
         try {
             console.log('[Dashboard] Loading lobby stats...');
@@ -290,7 +500,7 @@
                 fetch('/badminton/api/matches'),
                 fetch('/badminton/api/sessions')
             ]);
-            
+
             if (playersRes.ok) {
                 const players = await playersRes.json();
                 console.log('[Dashboard] Players loaded:', players.length);
@@ -299,7 +509,7 @@
                 console.error('[Dashboard] Players API failed:', playersRes.status);
                 document.getElementById('total-players').textContent = '?';
             }
-            
+
             if (matchesRes.ok) {
                 const matches = await matchesRes.json();
                 console.log('[Dashboard] Matches loaded:', matches.length);
@@ -308,12 +518,15 @@
                 console.error('[Dashboard] Matches API failed:', matchesRes.status);
                 document.getElementById('total-matches').textContent = '?';
             }
-            
+
             if (sessionsRes.ok) {
                 const sessions = await sessionsRes.json();
                 console.log('[Dashboard] Sessions loaded:', sessions.length);
                 document.getElementById('total-sessions').textContent = sessions.length;
-                await loadLastSessions(sessions);
+                await Promise.all([
+                    loadLastSessions(sessions),
+                    initEarningsFilter(sessions),
+                ]);
             } else {
                 console.error('[Dashboard] Sessions API failed:', sessionsRes.status);
                 document.getElementById('total-sessions').textContent = '?';
@@ -325,123 +538,200 @@
             document.getElementById('total-sessions').textContent = '!';
         }
     }
-    
-    async function loadMonthlyEarnings() {
-        const currentMonthListEl = document.getElementById('currentMonthList');
-        const lastMonthListEl = document.getElementById('lastMonthList');
-        
-        try {
-            console.log('[Dashboard] Loading monthly earnings...');
-            const now = new Date();
-            const currentYear = now.getFullYear();
-            const currentMonth = now.getMonth() + 1;
-            
-            let prevYear = currentYear;
-            let prevMonth = currentMonth - 1;
-            if (prevMonth === 0) {
-                prevMonth = 12;
-                prevYear = currentYear - 1;
+
+    // Earnings filter state
+    const DASH_MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    let dashAvailableMonths = {}; // { year: [1,2,...] }
+    let dashSelectedYear = new Date().getFullYear();
+    let dashRangeStart = null;
+    let dashRangeEnd = null;
+
+    async function initEarningsFilter(sessions) {
+        // Build available months from sessions
+        sessions.forEach(s => {
+            const [y, m] = s.date.split('-').map(Number);
+            if (!dashAvailableMonths[y]) dashAvailableMonths[y] = new Set();
+            dashAvailableMonths[y].add(m);
+        });
+        for (const y in dashAvailableMonths) {
+            dashAvailableMonths[y] = [...dashAvailableMonths[y]].sort((a, b) => a - b);
+        }
+
+        // Default to current year/month
+        const now = new Date();
+        dashSelectedYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+
+        // If current year has no sessions, fall back to most recent year
+        if (!dashAvailableMonths[dashSelectedYear]) {
+            const years = Object.keys(dashAvailableMonths).map(Number).sort((a, b) => b - a);
+            if (years.length > 0) dashSelectedYear = years[0];
+        }
+
+        // Pre-select current month if it exists in the available months, else last available month
+        const available = dashAvailableMonths[dashSelectedYear] || [];
+        if (available.includes(currentMonth)) {
+            dashRangeStart = currentMonth;
+            dashRangeEnd = currentMonth;
+        } else if (available.length > 0) {
+            const lastMonth = available[available.length - 1];
+            dashRangeStart = lastMonth;
+            dashRangeEnd = lastMonth;
+        }
+
+        renderDashYearButtons();
+        renderDashMonthButtons();
+        await loadDashEarnings();
+    }
+
+    function renderDashYearButtons() {
+        const row = document.getElementById('dashEarningsYearRow');
+        const years = Object.keys(dashAvailableMonths).map(Number).sort((a, b) => a - b);
+        row.innerHTML = years.map(y =>
+            `<button class="btn-year${y === dashSelectedYear ? ' active' : ''}" data-year="${y}">${y}</button>`
+        ).join('');
+        row.querySelectorAll('.btn-year').forEach(btn => {
+            btn.addEventListener('click', () => {
+                dashSelectedYear = parseInt(btn.dataset.year);
+                dashRangeStart = null;
+                dashRangeEnd = null;
+                renderDashYearButtons();
+                renderDashMonthButtons();
+                loadDashEarnings();
+            });
+        });
+    }
+
+    function renderDashMonthButtons() {
+        const container = document.getElementById('dashEarningsMonthRow');
+        const months = dashAvailableMonths[dashSelectedYear] || [];
+
+        if (months.length === 0) {
+            container.innerHTML = '<span style="color: var(--text-muted); font-size: 0.8rem;">No sessions recorded for this year</span>';
+            updateDashRangeLabel();
+            return;
+        }
+
+        container.innerHTML = months.map(m => {
+            let cls = 'btn-month';
+            if (dashRangeStart !== null && dashRangeEnd !== null) {
+                const lo = Math.min(dashRangeStart, dashRangeEnd);
+                const hi = Math.max(dashRangeStart, dashRangeEnd);
+                if (m === lo || m === hi) cls += ' active';
+                else if (m > lo && m < hi) cls += ' in-range';
+            } else if (dashRangeStart !== null && m === dashRangeStart) {
+                cls += ' active';
             }
-            
-            const currentMonthName = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-            const prevMonthDate = new Date(prevYear, prevMonth - 1, 1);
-            const prevMonthName = prevMonthDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-            
-            document.getElementById('currentMonthHeader').textContent = currentMonthName;
-            document.getElementById('lastMonthHeader').textContent = prevMonthName;
-            
-            const [currentRes, prevRes] = await Promise.all([
-                fetch(`/badminton/api/earnings/monthly?year=${currentYear}&month=${currentMonth}`),
-                fetch(`/badminton/api/earnings/monthly?year=${prevYear}&month=${prevMonth}`)
-            ]);
-            
-            const renderMonthEarnings = (earnings) => {
-                if (!earnings || earnings.length === 0) {
-                    return '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">No stats data yet</div>';
+            return `<button class="${cls}" data-month="${m}">${DASH_MONTH_NAMES[m - 1]}</button>`;
+        }).join('');
+
+        container.querySelectorAll('.btn-month').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const m = parseInt(btn.dataset.month);
+                if (dashRangeStart === null) {
+                    dashRangeStart = m;
+                    dashRangeEnd = m;
+                } else if (dashRangeEnd !== null && dashRangeStart !== dashRangeEnd) {
+                    dashRangeStart = m;
+                    dashRangeEnd = m;
+                } else if (dashRangeStart === m) {
+                    dashRangeStart = null;
+                    dashRangeEnd = null;
+                } else {
+                    dashRangeEnd = m;
                 }
-                
-                return earnings.map(player => {
-                    const earningsFormatted = formatEarnings(player.net_earnings);
-                    return `
-                        <div class="session-earnings-item">
-                            <span>${escapeHtml(player.player)} <span style="color: var(--text-muted); font-size: 0.8rem;">(${player.games_played})</span></span>
-                            <span class="${earningsFormatted.className}">${earningsFormatted.text}</span>
-                        </div>
-                    `;
-                }).join('');
-            };
-            
-            if (currentRes.ok) {
-                const currentEarnings = await currentRes.json();
-                console.log('[Dashboard] Current month earnings loaded:', currentEarnings.length);
-                currentMonthListEl.innerHTML = renderMonthEarnings(currentEarnings);
-            } else {
-                console.error('[Dashboard] Current month API failed:', currentRes.status);
-                currentMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Failed to load</div>';
+                renderDashMonthButtons();
+                loadDashEarnings();
+            });
+        });
+
+        updateDashRangeLabel();
+    }
+
+    function updateDashRangeLabel() {
+        const label = document.getElementById('dashEarningsRangeLabel');
+        if (dashRangeStart === null) {
+            label.textContent = `Showing full year ${dashSelectedYear}`;
+            return;
+        }
+        const lo = Math.min(dashRangeStart, dashRangeEnd);
+        const hi = Math.max(dashRangeStart, dashRangeEnd);
+        label.textContent = lo === hi
+            ? `Showing ${DASH_MONTH_NAMES[lo - 1]} ${dashSelectedYear}`
+            : `Showing ${DASH_MONTH_NAMES[lo - 1]} – ${DASH_MONTH_NAMES[hi - 1]} ${dashSelectedYear}`;
+    }
+
+    async function loadDashEarnings() {
+        const tbody = document.getElementById('dashEarningsTableBody');
+        tbody.innerHTML = '<tr><td colspan="3" class="table-empty">Loading...</td></tr>';
+        try {
+            const y = dashSelectedYear;
+            const from = dashRangeStart === null ? 1  : Math.min(dashRangeStart, dashRangeEnd);
+            const to   = dashRangeStart === null ? 12 : Math.max(dashRangeStart, dashRangeEnd);
+
+            const resp = await fetch(`/badminton/api/earnings/range?from_year=${y}&from_month=${from}&to_year=${y}&to_month=${to}`);
+            if (!resp.ok) throw new Error('API failed');
+            const earnings = await resp.json();
+
+            if (!earnings || earnings.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="table-empty">No data for this period</td></tr>';
+                return;
             }
-            
-            if (prevRes.ok) {
-                const prevEarnings = await prevRes.json();
-                console.log('[Dashboard] Previous month earnings loaded:', prevEarnings.length);
-                lastMonthListEl.innerHTML = renderMonthEarnings(prevEarnings);
-            } else {
-                console.error('[Dashboard] Previous month API failed:', prevRes.status);
-                lastMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Failed to load</div>';
-            }
+
+            tbody.innerHTML = earnings.map(p => {
+                const e = formatEarnings(p.net_earnings);
+                return `
+                    <tr>
+                        <td><a href="/badminton/player/${encodeURIComponent(p.player)}" class="player-link">${escapeHtml(p.player)}</a></td>
+                        <td style="text-align: center; color: var(--text-muted);">${p.games_played}</td>
+                        <td style="text-align: right;"><span class="${e.className}">${e.text}</span></td>
+                    </tr>
+                `;
+            }).join('');
         } catch (error) {
-            console.error('[Dashboard] Failed to load monthly earnings:', error);
-            currentMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Error loading data</div>';
-            lastMonthListEl.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Error loading data</div>';
+            console.error('[Dashboard] Failed to load earnings:', error);
+            tbody.innerHTML = '<tr><td colspan="3" class="table-empty">Failed to load</td></tr>';
         }
     }
-    
+
     async function loadLastSessions(sessions) {
         const tbody = document.getElementById('quickRecapTableBody');
-        
+
         try {
             console.log('[Dashboard] Loading last sessions...');
             const today = getTodayLocalDate();
-            const pastSessions = sessions.filter(s => s.date < today);
+            const pastSessions = sessions.filter(s => s.date < today && s.match_count > 0);
             pastSessions.sort((a, b) => b.date.localeCompare(a.date));
             const last5Sessions = pastSessions.slice(0, 5);
-            
+
             if (last5Sessions.length === 0) {
                 console.log('[Dashboard] No past sessions found');
                 tbody.innerHTML = '<tr><td colspan="3" class="table-empty">No previous sessions found</td></tr>';
                 return;
             }
-            
+
             console.log('[Dashboard] Loading earnings for', last5Sessions.length, 'sessions');
             const sessionDataPromises = last5Sessions.map(async session => {
                 try {
                     const response = await fetch(`/badminton/api/sessions/${session.session_id}/earnings`);
                     if (!response.ok) {
                         console.error(`[Dashboard] Session ${session.session_id} earnings failed:`, response.status);
-                        return {
-                            session,
-                            players: []
-                        };
+                        return { session, players: [] };
                     }
                     const earningsData = await response.json();
-                    return {
-                        session,
-                        players: earningsData.players || []
-                    };
+                    return { session, players: earningsData.players || [] };
                 } catch (err) {
                     console.error(`[Dashboard] Error loading session ${session.session_id}:`, err);
-                    return {
-                        session,
-                        players: []
-                    };
+                    return { session, players: [] };
                 }
             });
-            
+
             const sessionsData = await Promise.all(sessionDataPromises);
             console.log('[Dashboard] Session earnings loaded for', sessionsData.length, 'sessions');
-            
+
             const rowsHtml = sessionsData.map(({ session, players }) => {
                 players.sort((a, b) => b.net_earnings - a.net_earnings);
-                
+
                 const pillsHtml = players.map(p => {
                     const earningsStr = formatSignedInt(p.net_earnings);
                     let pillClass = 'player-pill--neutral';
@@ -450,16 +740,16 @@
                     } else if (p.net_earnings < 0) {
                         pillClass = 'player-pill--red';
                     }
-                    
+
                     return `<span class="player-pill ${pillClass}">${escapeHtml(p.player)} ${earningsStr}</span>`;
                 }).join('');
-                
+
                 const totalGames = session.match_count || 0;
                 const numberOfPlayers = players.length;
                 const totalGamesPlayed = players.reduce((sum, p) => sum + (p.games_played || 0), 0);
                 const playerAverage = numberOfPlayers > 0 ? Math.round(totalGamesPlayed / numberOfPlayers) : 0;
                 const gamesDisplay = `${playerAverage} \u2022 ${totalGames}`;
-                
+
                 return `
                     <tr>
                         <td>${formatDateDesign(session.date)}</td>
@@ -472,56 +762,395 @@
                     </tr>
                 `;
             }).join('');
-            
+
             tbody.innerHTML = rowsHtml;
         } catch (error) {
             console.error('Failed to load last sessions:', error);
             tbody.innerHTML = '<tr><td colspan="3" class="table-empty">Unable to load sessions</td></tr>';
         }
     }
-    
+
+    // Combined leaderboard state
+    let lbRows = [];       // { username, mmr, net_earnings }
+    let lbSortCol = 'mmr';
+    let lbSortDir = 'desc';
+
     async function loadLeaderboard() {
         try {
-            const response = await fetch('/badminton/api/players/stats');
-            if (response.ok) {
-                const players = await response.json();
-                const container = document.getElementById('leaderboard');
-                
-                // Filter players with at least 1 match
-                const activePlayers = players.filter(p => p.total_matches > 0);
-                
-                // Sort by MMR descending
-                activePlayers.sort((a, b) => b.mmr - a.mmr);
-                
-                container.innerHTML = activePlayers.map((p, i) => `
-                    <div class="leaderboard-item">
-                        <div class="leaderboard-rank">#${i + 1}</div>
-                        <div class="leaderboard-name">${escapeHtml(p.username)}</div>
-                        <div class="leaderboard-mmr">${p.mmr.toFixed(0)}</div>
-                    </div>
-                `).join('');
-            }
+            const [statsRes, earningsRes] = await Promise.all([
+                fetch('/badminton/api/players/stats'),
+                fetch('/badminton/api/earnings'),
+            ]);
+
+            const players = statsRes.ok ? await statsRes.json() : [];
+            const earnings = earningsRes.ok ? await earningsRes.json() : [];
+
+            const earningsMap = {};
+            earnings.forEach(e => { earningsMap[e.player] = e.net_earnings; });
+
+            lbRows = players
+                .filter(p => p.total_matches > 0)
+                .map(p => ({
+                    username: p.username,
+                    mmr: p.mmr,
+                    win_rate: p.win_rate ?? 0,
+                    net_earnings: earningsMap[p.username] ?? null,
+                }));
+
+            renderLeaderboard();
+            attachLeaderboardSortHandlers();
         } catch (error) {
             console.error('Failed to load leaderboard:', error);
         }
     }
-    
-    // Load all data on page load sequentially to avoid race conditions
+
+    function renderLeaderboard() {
+        const tbody = document.getElementById('leaderboardBody');
+
+        const sorted = [...lbRows].sort((a, b) => {
+            let aVal = lbSortCol === 'mmr' ? a.mmr : lbSortCol === 'winrate' ? a.win_rate : (a.net_earnings ?? -Infinity);
+            let bVal = lbSortCol === 'mmr' ? b.mmr : lbSortCol === 'winrate' ? b.win_rate : (b.net_earnings ?? -Infinity);
+            return lbSortDir === 'desc' ? bVal - aVal : aVal - bVal;
+        });
+
+        tbody.innerHTML = sorted.map((p, i) => {
+            const e = p.net_earnings !== null ? formatEarnings(p.net_earnings) : { text: '—', className: '' };
+            const winPct = Math.round(p.win_rate);
+            const lossPct = 100 - winPct;
+            return `
+                <tr>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">${i + 1}</td>
+                    <td><a href="/badminton/player/${encodeURIComponent(p.username)}" class="player-link">${escapeHtml(p.username)}</a></td>
+                    <td>
+                        <div class="win-rate-bar lb-winrate-bar">
+                            <div class="win-rate-bar-segment win-segment" style="width:${winPct}%;"></div>
+                            <div class="win-rate-bar-segment loss-segment" style="width:${lossPct}%;"></div>
+                            <div class="win-rate-label">${winPct}%</div>
+                        </div>
+                        <span class="lb-winrate-number">${winPct}%</span>
+                    </td>
+                    <td style="text-align: right; font-weight: 600; color: var(--dg-500);">${Math.round(p.mmr)}</td>
+                    <td style="text-align: right;"><span class="${e.className}">${e.text}</span></td>
+                </tr>
+            `;
+        }).join('');
+
+        // Update header indicators
+        document.querySelectorAll('.lb-sort-col').forEach(th => {
+            const col = th.dataset.col;
+            const indicator = th.querySelector('.lb-sort-indicator');
+            th.classList.toggle('lb-active', col === lbSortCol);
+            indicator.textContent = col === lbSortCol ? (lbSortDir === 'desc' ? '↓' : '↑') : '';
+        });
+    }
+
+    function attachLeaderboardSortHandlers() {
+        document.querySelectorAll('.lb-sort-col').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.col;
+                if (lbSortCol === col) {
+                    lbSortDir = lbSortDir === 'desc' ? 'asc' : 'desc';
+                } else {
+                    lbSortCol = col;
+                    lbSortDir = 'desc';
+                }
+                renderLeaderboard();
+            });
+        });
+    }
+
+    async function loadMmrMovers() {
+        const container = document.getElementById('mmrMoversList');
+        try {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = now.getMonth() + 1;
+
+            let prevYear = year, prevMonth = month - 1;
+            if (prevMonth === 0) { prevMonth = 12; prevYear = year - 1; }
+
+            const label = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+            document.getElementById('mmrMoversMonthLabel').textContent = label;
+
+            // Fetch current and previous month snapshots + monthly earnings for games_played
+            const [currSnap, prevSnap, earningsResp] = await Promise.all([
+                fetch(`/badminton/api/mmr/snapshot?year=${year}&month=${month}`).then(r => r.ok ? r.json() : {}),
+                fetch(`/badminton/api/mmr/snapshot?year=${prevYear}&month=${prevMonth}`).then(r => r.ok ? r.json() : {}),
+                fetch(`/badminton/api/earnings/monthly?year=${year}&month=${month}`),
+            ]);
+
+            const monthlyEarnings = earningsResp.ok ? await earningsResp.json() : [];
+            const gamesMap = {};
+            monthlyEarnings.forEach(e => { gamesMap[e.player] = e.games_played; });
+
+            // Only show players who actually played this month
+            const players = Object.keys(gamesMap)
+                .filter(name => gamesMap[name] > 0 && currSnap[name] != null)
+                .map(name => ({
+                    name,
+                    mmr_before: prevSnap[name] ?? 1500,
+                    mmr_after: currSnap[name],
+                    mmr_change: currSnap[name] - (prevSnap[name] ?? 1500),
+                    games_played: gamesMap[name],
+                }))
+                .sort((a, b) => b.mmr_change - a.mmr_change);
+
+            if (players.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">No activity this month yet</div>';
+                return;
+            }
+
+            const rows = players.map(p => {
+                const change = Math.round(p.mmr_change);
+                const changeClass = change > 0 ? 'earnings-positive' : change < 0 ? 'earnings-negative' : '';
+                const arrow = change > 0 ? '↑' : change < 0 ? '↓' : '–';
+                const changeText = change !== 0 ? `${arrow} ${Math.abs(change)}` : '–';
+                return `
+                    <tr>
+                        <td><a href="/badminton/player/${encodeURIComponent(p.name)}" class="player-link">${escapeHtml(p.name)}</a></td>
+                        <td class="center">${p.games_played}</td>
+                        <td class="center mmr-movers-before" style="color: var(--text-muted);">${Math.round(p.mmr_before)}</td>
+                        <td class="center">${Math.round(p.mmr_after)}</td>
+                        <td class="right"><span class="mmr-change-cell ${changeClass}">${changeText}</span></td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <table class="mmr-movers-table">
+                    <thead>
+                        <tr>
+                            <th>Player</th>
+                            <th class="center">Games</th>
+                            <th class="center mmr-movers-before">Before</th>
+                            <th class="center">After</th>
+                            <th class="right">Change</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        } catch (error) {
+            console.error('[Dashboard] Failed to load MMR movers:', error);
+            container.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Failed to load</div>';
+        }
+    }
+
+
+    let allPartnerships = [];
+    let partnershipsExpanded = false;
+
+    async function loadTopPartnerships() {
+        const container = document.getElementById('partnershipsList');
+        try {
+            const resp = await fetch('/badminton/api/partnerships?min_games=5');
+            if (!resp.ok) throw new Error('API failed');
+            const data = await resp.json();
+
+            allPartnerships = (data.partnerships || []).sort((a, b) => b.win_rate - a.win_rate);
+
+            renderPartnerships();
+        } catch (error) {
+            console.error('[Dashboard] Failed to load partnerships:', error);
+            container.innerHTML = '<div style="color: var(--danger); padding: 1rem;">Failed to load</div>';
+        }
+    }
+
+    function renderPartnerships() {
+        const container = document.getElementById('partnershipsList');
+
+        if (allPartnerships.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.875rem; padding: 1rem;">No partnerships with 5+ games yet</div>';
+            return;
+        }
+
+        const visible = partnershipsExpanded ? allPartnerships : allPartnerships.slice(0, 5);
+        const hidden = allPartnerships.length - 5;
+
+        const rows = visible.map((p, i) => {
+            const winPct = (p.win_rate * 100).toFixed(1);
+            const winClass = p.win_rate >= 0.5 ? 'earnings-positive' : 'earnings-negative';
+            return `
+                <tr>
+                    <td>
+                        <span class="partnership-rank">#${i + 1}</span>
+                        ${escapeHtml(p.players[0])} &amp; ${escapeHtml(p.players[1])}
+                    </td>
+                    <td class="center">${p.games}</td>
+                    <td class="center" style="color: var(--text-muted);">${p.wins}W ${p.losses}L</td>
+                    <td class="right"><span class="${winClass}">${winPct}%</span></td>
+                </tr>
+            `;
+        }).join('');
+
+        const showToggle = allPartnerships.length > 5;
+        const toggleLabel = partnershipsExpanded ? 'Show less' : `Show all (${hidden} more)`;
+
+        container.innerHTML = `
+            <table class="partnerships-table">
+                <thead>
+                    <tr>
+                        <th>Partnership</th>
+                        <th class="center">Games</th>
+                        <th class="center">Record</th>
+                        <th class="right">Win %</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+            ${showToggle ? `<div class="partnerships-toggle"><button id="partnershipsToggleBtn" class="btn-year" style="font-size:0.75rem; padding: 0.3rem 0.85rem;">${toggleLabel}</button></div>` : ''}
+        `;
+
+        if (showToggle) {
+            document.getElementById('partnershipsToggleBtn').addEventListener('click', () => {
+                partnershipsExpanded = !partnershipsExpanded;
+                renderPartnerships();
+            });
+        }
+    }
+
+    async function loadMmrTimeline() {
+        const canvas = document.getElementById('mmrChart');
+        const emptyEl = document.getElementById('mmrChartEmpty');
+
+        try {
+            if (typeof Chart === 'undefined') {
+                throw new Error('Chart.js not loaded');
+            }
+
+            const now = new Date();
+            // Build last 6 month descriptors
+            const months = [];
+            for (let i = 5; i >= 0; i--) {
+                const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                months.push({ year: d.getFullYear(), month: d.getMonth() + 1, label: d.toLocaleString('en-US', { month: 'short', year: '2-digit' }) });
+            }
+
+            const snapshots = await Promise.all(
+                months.map(({ year, month }) =>
+                    fetch(`/badminton/api/mmr/snapshot?year=${year}&month=${month}`)
+                        .then(r => r.ok ? r.json() : {})
+                        .catch(() => ({}))
+                )
+            );
+
+            console.log('[Dashboard] MMR snapshots:', snapshots);
+
+            // Collect all player names (exclude error keys)
+            const playerSet = new Set();
+            snapshots.forEach(snap => {
+                if (snap && !snap.error) {
+                    Object.keys(snap).forEach(p => playerSet.add(p));
+                }
+            });
+
+            // Only plot players with at least 1 data point
+            const activePlayers = [...playerSet].filter(
+                p => snapshots.some(snap => snap[p] != null)
+            );
+
+            if (activePlayers.length === 0) {
+                canvas.style.display = 'none';
+                emptyEl.style.display = 'block';
+                return;
+            }
+
+            // Sort by latest non-null MMR descending, cap at 10
+            activePlayers.sort((a, b) => {
+                const aVal = [...snapshots].reverse().find(s => s[a] != null)?.[a] || 0;
+                const bVal = [...snapshots].reverse().find(s => s[b] != null)?.[b] || 0;
+                return bVal - aVal;
+            });
+            const topPlayers = activePlayers.slice(0, 10);
+
+            const COLORS = [
+                '#40916C', '#2A9D8F', '#E9C46A', '#F4A261',
+                '#E76F51', '#9B5DE5', '#00BBF9', '#F15BB5',
+                '#06D6A0', '#A9B8B3'
+            ];
+
+            const datasets = topPlayers.map((player, i) => ({
+                label: player,
+                data: snapshots.map(snap => snap[player] ?? null),
+                borderColor: COLORS[i % COLORS.length],
+                backgroundColor: COLORS[i % COLORS.length] + '20',
+                tension: 0.3,
+                spanGaps: true,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                borderWidth: 2,
+            }));
+
+            new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: months.map(m => m.label),
+                    datasets,
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#E6F0EA',
+                                font: { size: 11 },
+                                boxWidth: 12,
+                                padding: 12,
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: '#3A4145',
+                            titleColor: '#E6F0EA',
+                            bodyColor: '#A9B8B3',
+                            borderColor: '#4A5155',
+                            borderWidth: 1,
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#A9B8B3', font: { size: 11 } },
+                            grid: { color: 'rgba(74,81,85,0.5)' },
+                        },
+                        y: {
+                            ticks: { color: '#A9B8B3', font: { size: 11 } },
+                            grid: { color: 'rgba(74,81,85,0.5)' },
+                        }
+                    },
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('[Dashboard] Failed to load MMR timeline:', error);
+            canvas.style.display = 'none';
+            emptyEl.style.display = 'block';
+            emptyEl.textContent = 'Failed to load timeline';
+        }
+    }
+
+    // Load all data on page load
     async function loadAllDashboardData() {
         try {
             console.log('[Dashboard] Starting data load...');
-            await loadLobbyStats();
-            console.log('[Dashboard] Lobby stats complete');
-            await loadMonthlyEarnings();
-            console.log('[Dashboard] Monthly earnings complete');
-            await loadLeaderboard();
-            console.log('[Dashboard] Leaderboard complete');
+            await Promise.all([
+                loadLobbyStats(),
+                loadMmrMovers(),
+                loadTopPartnerships(),
+                loadMmrTimeline(),
+                loadLeaderboard(),
+            ]);
             console.log('[Dashboard] All data loaded successfully');
         } catch (error) {
             console.error('[Dashboard] Error loading dashboard data:', error);
         }
     }
-    
+
     loadAllDashboardData();
 </script>
 {% endblock %}

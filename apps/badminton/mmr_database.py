@@ -31,26 +31,37 @@ def recalculate_all_mmr(k_factor: float = DEFAULT_K_FACTOR) -> Dict[str, float]:
     Returns:
         Dictionary mapping username to final MMR rating
     """
+    from sqlalchemy.orm import joinedload
+
     with session_scope() as session:
-        # Get all users and reset MMR to starting rating
+        # Load all users once and build a lookup dict — no per-match user queries
         users = session.query(User).all()
-        player_ratings = {}
-        
+        user_by_name = {u.username: u for u in users}
+        player_ratings = {u.username: DEFAULT_STARTING_RATING for u in users}
+
+        # Reset every player to starting MMR upfront
         for user in users:
             user.mmr = DEFAULT_STARTING_RATING
-            player_ratings[user.username] = DEFAULT_STARTING_RATING
-        
-        # Get all matches ordered chronologically
-        matches = session.query(Match).order_by(Match.created_at).all()
-        
-        # Process each match
+
+        # Eager-load all four player relations so .username accesses don't
+        # each fire a lazy SELECT inside the loop
+        matches = (
+            session.query(Match)
+            .options(
+                joinedload(Match.team1_player1),
+                joinedload(Match.team1_player2),
+                joinedload(Match.team2_player1),
+                joinedload(Match.team2_player2),
+            )
+            .order_by(Match.created_at)
+            .all()
+        )
+
         for match in matches:
-            # Get player usernames
             team1_players = [match.team1_player1.username, match.team1_player2.username]
             team2_players = [match.team2_player1.username, match.team2_player2.username]
             winner = 'team1' if match.winner_team == 1 else 'team2'
-            
-            # Calculate rating changes
+
             rating_changes = process_match(
                 team1_players,
                 team2_players,
@@ -58,21 +69,18 @@ def recalculate_all_mmr(k_factor: float = DEFAULT_K_FACTOR) -> Dict[str, float]:
                 player_ratings,
                 k_factor
             )
-            
-            # Update user MMR in database
+
+            # Write updated ratings straight into the already-loaded user objects —
+            # no additional SELECT per match
             for username, new_rating in player_ratings.items():
-                user = session.query(User).filter_by(username=username).first()
-                if user:
-                    user.mmr = new_rating
-            
-            # Store the MMR change for the match (use average change across all players)
+                if username in user_by_name:
+                    user_by_name[username].mmr = new_rating
+
             if rating_changes:
-                # Take absolute value of any player's change (they're all the same magnitude)
-                mmr_change = abs(list(rating_changes.values())[0])
-                match.mmr_change = mmr_change
-        
+                match.mmr_change = abs(list(rating_changes.values())[0])
+
         session.commit()
-        
+
         return player_ratings
 
 

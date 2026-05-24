@@ -18,9 +18,7 @@ def _now_pacific():
 from flask_httpauth import HTTPBasicAuth
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 import json
-import threading
 import os
-import tempfile
 import sys
 from pathlib import Path
 
@@ -29,6 +27,7 @@ from database import init_db, session_scope
 from models import User, UserRole, Match
 from auth import authenticate_user, create_user, get_user_by_id, get_user_by_username, change_password, admin_required
 from player_stats import get_player_stats, get_leaderboard
+from matchup_generator import MatchupGenerator
 
 app = Flask(__name__)
 auth = HTTPBasicAuth()  # Keep for backwards compatibility
@@ -103,220 +102,138 @@ def after_request(response):
     
     return response
 
-# File paths - use parent data directory to match production
-DATA_DIR = Path(__file__).parent.parent.parent / 'data'
-PLAYERS_FILE = DATA_DIR / 'players.json'
-MATCHES_FILE = DATA_DIR / 'matches.json'
+# Initialize storage (database-backed, no file path needed)
+storage = MatchStorage()
 
-# Thread lock for file operations
-file_lock = threading.Lock()
+# ── Session-scoped matchup generator ─────────────────────────────────────────
+# One generator instance lives for the lifetime of a calendar day (Pacific time).
+# It accumulates sit-out / partnership history as matches are recorded so that
+# scenario recommendations improve throughout the session.
+_generator: MatchupGenerator | None = None
+_generator_date: str | None = None       # "YYYY-MM-DD" of the current generator
+_generator_players: list | None = None   # active player list the generator was built for
 
-# In-memory session state
-# Players is now list of dicts: [{'name': str, 'active': bool, 'order': int}, ...]
-session_state = {
-    'players': [],
-    'next_game_number': 1
-}
-
-# Initialize storage
-storage = MatchStorage(data_dir=str(DATA_DIR))
-
-
-def ensure_data_files():
-    """Ensure data directory and files exist."""
-    DATA_DIR.mkdir(exist_ok=True)
-    
-    if not MATCHES_FILE.exists():
-        with file_lock:
-            with open(MATCHES_FILE, 'w') as f:
-                json.dump([], f)
-    
-    if not PLAYERS_FILE.exists():
-        with file_lock:
-            with open(PLAYERS_FILE, 'w') as f:
-                json.dump(session_state, f, indent=2)
+# ── Scenario result cache ─────────────────────────────────────────────────────
+# Avoids recomputing scenarios on every page reload when state hasn't changed.
+# Keyed on (num_courts, generation_counter). The counter increments whenever
+# a match is recorded or the player list changes — ensuring stale results are
+# never served.
+_scenario_cache: dict = {}
+_scenario_generation: int = 0
 
 
-def migrate_players_data():
+def _invalidate_scenario_cache():
+    """Bump the generation counter and clear cached results."""
+    global _scenario_generation
+    _scenario_generation += 1
+    _scenario_cache.clear()
+
+
+def _get_or_create_generator(active_players: list) -> MatchupGenerator:
     """
-    Migrate players from old list-of-strings format to new object format.
-    Old: ["Hayden", "Danny", ...]
-    New: [{"name": "Hayden", "active": true, "order": 0}, ...]
+    Return the session-scoped generator, creating (or recreating) it when:
+      - No generator exists yet
+      - The calendar date has changed (new session day)
+      - The active player list has changed
+
+    When creating fresh, replay today's already-recorded matches so the
+    sit-out / partnership state is accurate even after an app restart.
     """
-    with file_lock:
-        if not PLAYERS_FILE.exists():
-            return
-        
-        try:
-            with open(PLAYERS_FILE, 'r') as f:
-                data = json.load(f)
-            
-            players = data.get('players', [])
-            
-            # Check if migration is needed
-            if not players:
-                return
-            
-            # If first player is a string, migrate to object format
-            if isinstance(players[0], str):
-                print("Migrating players to new object format...")
-                # Create backup
-                backup_file = DATA_DIR / 'players.json.bak'
-                with open(backup_file, 'w') as f:
-                    json.dump(data, f, indent=2)
-                print(f"Backup saved to {backup_file}")
-                
-                # Convert to new format
-                migrated_players = [
-                    {'name': name, 'active': True, 'order': idx}
-                    for idx, name in enumerate(players)
-                ]
-                data['players'] = migrated_players
-                
-                # Save migrated data atomically
-                temp_fd, temp_path = tempfile.mkstemp(dir=DATA_DIR, suffix='.json')
-                try:
-                    with os.fdopen(temp_fd, 'w') as f:
-                        json.dump(data, f, indent=2)
-                    os.replace(temp_path, PLAYERS_FILE)
-                    print(f"Successfully migrated {len(migrated_players)} players")
-                except Exception as e:
-                    try:
-                        os.unlink(temp_path)
-                    except:
-                        pass
-                    raise e
-            
-            # If players are objects but missing 'active' or 'order', add defaults
-            elif isinstance(players[0], dict):
-                needs_update = False
-                for idx, player in enumerate(players):
-                    if 'active' not in player:
-                        player['active'] = True
-                        needs_update = True
-                    if 'order' not in player:
-                        player['order'] = idx
-                        needs_update = True
-                
-                if needs_update:
-                    print("Adding missing 'active' and 'order' fields to players...")
-                    temp_fd, temp_path = tempfile.mkstemp(dir=DATA_DIR, suffix='.json')
-                    try:
-                        with os.fdopen(temp_fd, 'w') as f:
-                            json.dump(data, f, indent=2)
-                        os.replace(temp_path, PLAYERS_FILE)
-                        print("Successfully updated player data")
-                    except Exception as e:
-                        try:
-                            os.unlink(temp_path)
-                        except:
-                            pass
-                        raise e
-        
-        except json.JSONDecodeError as e:
-            print(f"Error loading players.json: {e}")
-        except Exception as e:
-            print(f"Error during migration: {e}")
+    global _generator, _generator_date, _generator_players
+
+    today = datetime.now(_PACIFIC).strftime('%Y-%m-%d')
+    players_changed = _generator_players != sorted(active_players)
+    date_changed = _generator_date != today
+
+    if _generator is None or date_changed or players_changed:
+        _generator = MatchupGenerator(active_players)
+        _generator_date = today
+        _generator_players = sorted(active_players)
+
+        # Seed with today's session history from the DB
+        _seed_generator_from_today(_generator)
+
+    return _generator
 
 
-def load_session():
-    """Load session state from file."""
-    global session_state
-    
-    with file_lock:
-        if PLAYERS_FILE.exists():
-            try:
-                with open(PLAYERS_FILE, 'r') as f:
-                    loaded = json.load(f)
-                    # Merge with defaults to handle missing keys
-                    session_state['players'] = loaded.get('players', [])
-                    session_state['next_game_number'] = loaded.get('next_game_number', 1)
-            except json.JSONDecodeError:
-                pass
-    
-    # Initialize next_game_number from existing matches if needed
-    matches = storage.get_all_matches()
-    if matches:
-        max_game_number = max((m.get('game_number', 0) for m in matches), default=0)
-        if max_game_number >= session_state['next_game_number']:
-            session_state['next_game_number'] = max_game_number + 1
+def _seed_generator_from_today(gen: MatchupGenerator):
+    """
+    Replay all matches recorded today (Pacific time) into the generator so its
+    sit-out / partnership counts reflect the current session state.
+    """
+    today_start = datetime.now(_PACIFIC).replace(hour=0, minute=0, second=0, microsecond=0)
+    with session_scope() as db_sess:
+        today_matches = (
+            db_sess.query(Match)
+            .filter(Match.created_at >= today_start)
+            .order_by(Match.game_number)
+            .all()
+        )
+        match_dicts = []
+        for m in today_matches:
+            t1p1 = m.team1_player1.username if m.team1_player1 else None
+            t1p2 = m.team1_player2.username if m.team1_player2 else None
+            t2p1 = m.team2_player1.username if m.team2_player1 else None
+            t2p2 = m.team2_player2.username if m.team2_player2 else None
+            if t1p1 and t1p2 and t2p1 and t2p2:
+                match_dicts.append({'team1': [t1p1, t1p2], 'team2': [t2p1, t2p2]})
+        gen.seed_from_matches(match_dicts)
+
+
+def _build_scenarios(num_courts: int) -> dict:
+    """
+    Return one scenario per mode (competitive, balanced, random) for `num_courts` active courts.
+    Results are cached per (num_courts, generation); the cache is invalidated
+    whenever a match is recorded or the player list changes.
+    """
+    active = get_active_players()
+    if len(active) < 4:
+        return {'competitive': [], 'balanced': [], 'random': []}
+
+    cache_key = (num_courts, _scenario_generation)
+    if cache_key in _scenario_cache:
+        return _scenario_cache[cache_key]
+
+    # Fetch current MMRs for all active players
+    with session_scope() as session:
+        users = session.query(User)\
+            .filter(User.username.in_(active))\
+            .all()
+        player_mmrs = {u.username: float(u.mmr or 1500.0) for u in users}
+
+    gen = _get_or_create_generator(active)
+    result = gen.generate_competitive_balanced_scenarios(
+        num_courts=num_courts,
+        player_mmrs=player_mmrs,
+    )
+    _scenario_cache[cache_key] = result
+    return result
 
 
 def get_active_players():
     """
-    Get list of active player names (excluding deactivated players).
-    Returns: List of active player name strings
+    Get list of active player names for matchup generation.
+    Includes PLAYER-role users and ADMIN-role users who are active,
+    except the generic 'admin' service account (username case-insensitive).
+    Returns: List of active player name strings ordered by display_order.
     """
-    return [
-        p['name'] for p in session_state['players'] 
-        if p.get('active', True) and not p.get('deactivated', False)
-    ]
-
-
-def get_player_by_name(name):
-    """
-    Get player object by name.
-    Returns: Player dict or None
-    """
-    for player in session_state['players']:
-        if player['name'] == name:
-            return player
-    return None
-
-
-def save_session():
-    """Save session state to file using atomic write."""
-    # Note: Caller must hold file_lock
-    # Use atomic write: write to temp file, then rename
-    temp_fd, temp_path = tempfile.mkstemp(dir=DATA_DIR, suffix='.json')
-    try:
-        with os.fdopen(temp_fd, 'w') as f:
-            json.dump(session_state, f, indent=2)
-        # Atomic rename
-        os.replace(temp_path, PLAYERS_FILE)
-    except Exception as e:
-        # Clean up temp file if it exists
-        try:
-            os.unlink(temp_path)
-        except:
-            pass
-        raise e
+    with session_scope() as session:
+        players = session.query(User)\
+            .filter(User.role.in_([UserRole.PLAYER, UserRole.ADMIN]))\
+            .filter(User.username != 'admin')\
+            .filter(User.active == True)\
+            .filter(User.deactivated == False)\
+            .order_by(User.display_order)\
+            .all()
+        return [p.username for p in players]
 
 
 
 
-# Initialize database FIRST (before any database queries)
+# Initialize database
 print("Initializing database...")
 init_db()
 print("Database initialization complete")
-
-# Initialize on startup
-ensure_data_files()
-
-# Migrate players from old sessions.json if needed
-OLD_SESSIONS_FILE = DATA_DIR / 'sessions.json'
-if OLD_SESSIONS_FILE.exists() and not PLAYERS_FILE.exists():
-    print("Migrating players from old sessions.json...")
-    try:
-        with open(OLD_SESSIONS_FILE, 'r') as f:
-            old_data = json.load(f)
-            if isinstance(old_data, dict) and 'players' in old_data:
-                # Old format - extract players
-                session_state['players'] = old_data.get('players', [])
-                session_state['next_game_number'] = old_data.get('next_game_number', 1)
-                with file_lock:
-                    with open(PLAYERS_FILE, 'w') as pf:
-                        json.dump(session_state, pf, indent=2)
-                print(f"Migrated {len(session_state['players'])} players")
-    except Exception as e:
-        print(f"Player migration error: {e}")
-
-# Run player data migration first
-print("Checking for player data migration...")
-migrate_players_data()
-print("Player migration check complete")
-
-load_session()
 
 # Run migration to add sessions to existing matches
 print("Running match migration...")
@@ -368,16 +285,6 @@ def history_page():
     """Match history page."""
     return render_template('history.html')
 
-
-@app.route('/stats')
-@login_required
-def stats_page():
-    """Player statistics page."""
-    import os
-    template_path = os.path.join(app.root_path, 'templates', 'stats.html')
-    print(f"[DEBUG] Loading stats template from: {template_path}")
-    print(f"[DEBUG] Template exists: {os.path.exists(template_path)}")
-    return render_template('stats.html')
 
 
 @app.route('/sw.js')
@@ -440,28 +347,58 @@ def login():
 @app.route('/api/register', methods=['POST'])
 @admin_required
 def register():
-    """Register a new user account."""
+    """
+    Register a new user account (admin only).
+
+    Body fields:
+      username  — required
+      password  — required (min 6 chars)
+      role      — optional, one of: "player" (default), "admin", "demo"
+
+    Only player-role accounts appear in the player roster and match selection.
+    Admin and demo accounts are for login only.
+    """
     data = request.json if request.is_json else request.form
     username = data.get('username', '').strip()
     password = data.get('password', '')
-    
+    role_str = data.get('role', 'player').strip().lower()
+
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
-    
     if len(username) < 3 or len(username) > 50:
         return jsonify({'error': 'Username must be 3-50 characters'}), 400
-    
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
-    
+
+    role_map = {
+        'player': UserRole.PLAYER,
+        'admin':  UserRole.ADMIN,
+        'demo':   UserRole.DEMO,
+    }
+    if role_str not in role_map:
+        return jsonify({'error': f'Invalid role "{role_str}". Must be one of: player, admin, demo'}), 400
+
     try:
-        user = create_user(username, password, UserRole.PLAYER)
+        user = create_user(username, password, role_map[role_str])
         return jsonify({
-            'message': 'Account created successfully',
+            'message': f'{role_str.capitalize()} account created successfully',
             'user': user.to_dict()
         }), 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/users', methods=['GET'])
+@admin_required
+def get_all_users():
+    """
+    Get all user accounts regardless of role (admin only).
+    Includes player, admin, and demo accounts.
+    Use GET /api/players for the player-only roster.
+    """
+    with session_scope() as session:
+        users = session.query(User).order_by(User.role, User.display_order).all()
+        return jsonify([u.to_dict() for u in users])
 
 
 @app.route('/api/logout', methods=['POST', 'GET'])
@@ -506,7 +443,7 @@ def public_player_profile(username):
     user = get_user_by_username(username)
     if not user:
         flash(f'Player {username} not found', 'danger')
-        return redirect(url_for('stats_page'))
+        return redirect(url_for('dashboard_page'))
     
     return render_template('player_public.html', player_username=username)
 
@@ -880,9 +817,13 @@ def get_user_stats(user_id):
 @login_required
 def get_session():
     """Get current session status."""
+    with session_scope() as session:
+        last_match = session.query(Match).order_by(Match.game_number.desc()).first()
+        next_game_number = (last_match.game_number + 1) if last_match else 1
+        player_count = session.query(User).filter(User.deactivated == False).count()
     return jsonify({
-        'next_game_number': session_state['next_game_number'],
-        'player_count': len(session_state['players'])
+        'next_game_number': next_game_number,
+        'player_count': player_count
     })
 
 
@@ -893,38 +834,18 @@ def get_session():
 @login_required
 def get_players():
     """
-    Get list of all players with MMR from database.
-    
-    Returns player objects with name, active status, and MMR from database.
+    Get the player roster: all PLAYER-role users plus ADMIN-role users who
+    participate in matchups, ordered by display_order.
+    The generic 'admin' service account is excluded.
+    Use GET /api/users (admin only) to see all accounts including the service account.
     """
-    # Get session players (contains name, active, order, etc.)
-    players_list = session_state['players']
-    
-    # Enrich with MMR from database
-    enriched_players = []
     with session_scope() as session:
-        for player in players_list:
-            player_name = player['name'] if isinstance(player, dict) else player
-            
-            # Get MMR from database
-            user = session.query(User).filter_by(username=player_name).first()
-            mmr = user.mmr if user else 1500.0
-            
-            # Create enriched player object
-            if isinstance(player, dict):
-                enriched_player = dict(player)  # Copy existing fields
-                enriched_player['mmr'] = mmr
-            else:
-                # Old string format - convert to object
-                enriched_player = {
-                    'name': player_name,
-                    'active': True,
-                    'mmr': mmr
-                }
-            
-            enriched_players.append(enriched_player)
-    
-    return jsonify(enriched_players)
+        players = session.query(User)\
+            .filter(User.role.in_([UserRole.PLAYER, UserRole.ADMIN]))\
+            .filter(User.username != 'admin')\
+            .order_by(User.display_order)\
+            .all()
+        return jsonify([p.to_dict() for p in players])
 
 
 @app.route('/api/players', methods=['POST'])
@@ -933,40 +854,31 @@ def add_player():
     """Add a new player."""
     data = request.json
     name = data.get('name', '').strip()
-    
+
     if not name:
         return jsonify({'error': 'Player name cannot be empty'}), 400
-    
     if len(name) > 50:
         return jsonify({'error': 'Player name too long'}), 400
-    
-    # Check if player already exists (check by name)
-    if any(p['name'] == name for p in session_state['players']):
-        return jsonify({'error': 'Player already exists'}), 400
-    
-    # Create user account in database for this player
-    try:
-        # Check if user already exists in database
-        existing_user = get_user_by_username(name)
-        if not existing_user:
-            # Create new user with default password (same as username)
-            create_user(name, name, role=UserRole.PLAYER, mmr=1500.0)
-            print(f"Created database user for player: {name}")
-    except Exception as e:
-        print(f"Warning: Failed to create database user for {name}: {e}")
-        # Continue anyway - player can still be added to session
-    
-    # Add new player with default active state and order
-    new_player = {
-        'name': name,
-        'active': True,
-        'order': len(session_state['players'])  # Assign next order
-    }
-    session_state['players'].append(new_player)
-    with file_lock:
-        save_session()
-    
-    return jsonify({'player': new_player, 'message': 'Player added successfully'})
+
+    with session_scope() as session:
+        if session.query(User).filter_by(username=name).first():
+            return jsonify({'error': 'Player already exists'}), 400
+        display_order = session.query(User).count()
+
+    # create_user handles its own session and password hashing
+    create_user(name, name, role=UserRole.PLAYER, mmr=1500.0)
+
+    # Set roster fields
+    with session_scope() as session:
+        user = session.query(User).filter_by(username=name).first()
+        user.display_order = display_order
+        user.active = True
+        user.no_bet = False
+        user.deactivated = False
+        player_dict = user.to_dict()
+
+    print(f"Created player: {name}")
+    return jsonify({'player': player_dict, 'message': 'Player added successfully'})
 
 
 @app.route('/api/players/<name>/rename', methods=['PATCH'])
@@ -1004,13 +916,6 @@ def rename_player(name):
                 new_status = {(new_name if k == name else k): v for k, v in status.items()}
                 match.player_no_bet_status = new_status
 
-    # Update in-memory session state
-    player = get_player_by_name(name)
-    if player:
-        player['name'] = new_name
-        with file_lock:
-            save_session()
-
     return jsonify({'message': f"Renamed '{name}' to '{new_name}'"})
 
 
@@ -1018,14 +923,11 @@ def rename_player(name):
 @admin_required
 def delete_player(name):
     """Delete a player (admin only)."""
-    player = get_player_by_name(name)
-    if not player:
-        return jsonify({'error': 'Player not found'}), 404
-    
-    session_state['players'].remove(player)
-    with file_lock:
-        save_session()
-    
+    with session_scope() as session:
+        user = session.query(User).filter_by(username=name).first()
+        if not user:
+            return jsonify({'error': 'Player not found'}), 404
+        session.delete(user)
     return jsonify({'message': 'Player deleted successfully'})
 
 
@@ -1033,53 +935,43 @@ def delete_player(name):
 @login_required
 def toggle_player_active(name):
     """Toggle a player's active status and no-bet mode."""
-    player = get_player_by_name(name)
-    if not player:
-        return jsonify({'error': 'Player not found'}), 404
-    
     data = request.json
     if 'active' not in data or not isinstance(data['active'], bool):
         return jsonify({'error': 'Invalid request: "active" field (boolean) is required'}), 400
-    
-    # Update player active status
-    player['active'] = data['active']
-    
-    # Update no_bet status if provided
-    if 'no_bet' in data and isinstance(data['no_bet'], bool):
-        player['no_bet'] = data['no_bet']
-    
-    with file_lock:
-        save_session()
-    
-    return jsonify({'player': player, 'message': 'Player status updated successfully'})
+
+    with session_scope() as session:
+        user = session.query(User).filter_by(username=name).first()
+        if not user:
+            return jsonify({'error': 'Player not found'}), 404
+        user.active = data['active']
+        if 'no_bet' in data and isinstance(data['no_bet'], bool):
+            user.no_bet = data['no_bet']
+        player_dict = user.to_dict()
+
+    return jsonify({'player': player_dict, 'message': 'Player status updated successfully'})
 
 
 @app.route('/api/players/<name>/deactivated', methods=['PATCH'])
 @login_required
 def toggle_player_deactivated(name):
     """Toggle a player's deactivated status (hidden from main view)."""
-    player = get_player_by_name(name)
-    if not player:
-        return jsonify({'error': 'Player not found'}), 404
-    
     data = request.json
     if 'deactivated' not in data or not isinstance(data['deactivated'], bool):
         return jsonify({'error': 'Invalid request: "deactivated" field (boolean) is required'}), 400
-    
-    # Update player deactivated status
-    player['deactivated'] = data['deactivated']
-    
-    # When deactivating a player, also mark them as inactive (so they're excluded from recommendations)
-    # When reactivating a player, also make them active by default
-    if data['deactivated']:
-        player['active'] = False  # Deactivated players should not be in recommendations
-    else:
-        player['active'] = True   # Reactivated players become active
-    
-    with file_lock:
-        save_session()
-    
-    return jsonify({'player': player, 'message': 'Player visibility updated successfully'})
+
+    with session_scope() as session:
+        user = session.query(User).filter_by(username=name).first()
+        if not user:
+            return jsonify({'error': 'Player not found'}), 404
+        user.deactivated = data['deactivated']
+        # Deactivating also marks inactive; reactivating restores active
+        user.active = not data['deactivated']
+        player_dict = user.to_dict()
+
+    # Player list changed — invalidate scenario cache so next load recomputes.
+    _invalidate_scenario_cache()
+
+    return jsonify({'player': player_dict, 'message': 'Player visibility updated successfully'})
 
 
 
@@ -1123,6 +1015,34 @@ def get_matches():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/scenarios', methods=['GET'])
+@login_required
+def get_scenarios():
+    """
+    Return 2 paired matchup scenarios for the requested number of active courts.
+
+    Query params:
+        courts (int, default 1): number of active courts to generate scenarios for.
+
+    Response:
+        {
+          "scenarios": [
+            [{"team1": ["A","B"], "team2": ["C","D"]},   // Court 1
+             {"team1": ["E","F"], "team2": ["G","H"]}],  // Court 2
+            [...]                                         // scenario 2
+          ]
+        }
+    """
+    try:
+        num_courts = int(request.args.get('courts', 1))
+        num_courts = max(1, min(num_courts, 5))  # clamp 1–5
+    except (ValueError, TypeError):
+        num_courts = 1
+
+    scenarios = _build_scenarios(num_courts)
+    return jsonify({'scenarios': scenarios})
+
+
 @app.route('/api/matches', methods=['POST'])
 @login_required
 def record_match():
@@ -1136,6 +1056,7 @@ def record_match():
     team2_score = data.get('team2_score')
     game_value = data.get('game_value')
     player_no_bet_status = data.get('player_no_bet_status', {})
+    birds_used = data.get('birds_used')
 
     # Validate teams
     if not team1 or not team2:
@@ -1169,11 +1090,19 @@ def record_match():
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid game value'}), 400
 
-    # Assign game number and increment
-    with file_lock:
-        game_number = session_state['next_game_number']
-        session_state['next_game_number'] += 1
-        save_session()
+    # Validate birds_used (optional)
+    if birds_used is not None:
+        try:
+            birds_used = int(birds_used)
+            if birds_used < 1:
+                return jsonify({'error': 'birds_used must be at least 1'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid birds_used value'}), 400
+
+    # Derive next game number from the database
+    with session_scope() as db_sess:
+        last_match = db_sess.query(Match).order_by(Match.game_number.desc()).first()
+        game_number = (last_match.game_number + 1) if last_match else 1
 
     # Create match record
     match_data = {
@@ -1184,7 +1113,8 @@ def record_match():
         'team2_score': team2_score,
         'game_value': game_value,
         'winner': 'team1' if team1_score > team2_score else 'team2',
-        'player_no_bet_status': player_no_bet_status
+        'player_no_bet_status': player_no_bet_status,
+        'birds_used': birds_used
     }
 
     # Include session_id if provided (for adding to specific session)
@@ -1202,6 +1132,19 @@ def record_match():
         import traceback
         traceback.print_exc()
         # Don't fail the match save if MMR update fails
+
+    # Update the session generator with this match so future scenarios reflect
+    # the updated sit-out / partnership history immediately.
+    try:
+        active = get_active_players()
+        if len(active) >= 4:
+            gen = _get_or_create_generator(active)
+            gen._update_history(tuple(team1), tuple(team2))
+    except Exception:
+        pass  # Never block a successful match save
+
+    # Invalidate scenario cache — MMRs and generator history have changed.
+    _invalidate_scenario_cache()
 
     all_matches = storage.get_all_matches()
     saved_match = next((m for m in all_matches if m.get('match_id') == match_id), None)
@@ -1278,12 +1221,29 @@ def update_match(match_id):
         except ValueError:
             return jsonify({'error': 'Invalid game_value'}), 400
     
-    # Save updated matches
-    matches[match_index] = match_to_update
-    with file_lock:
-        with open(MATCHES_FILE, 'w') as f:
-            json.dump(matches, f, indent=2)
-    
+    # Persist changes to the database
+    update_payload = {}
+    if 'team1' in data:
+        update_payload['team1'] = match_to_update['team1']
+    if 'team2' in data:
+        update_payload['team2'] = match_to_update['team2']
+    if 'team1_score' in data:
+        update_payload['team1_score'] = match_to_update['team1_score']
+    if 'team2_score' in data:
+        update_payload['team2_score'] = match_to_update['team2_score']
+    if 'team1_score' in data or 'team2_score' in data:
+        # winner_team is 1 or 2 (int), derived from score comparison
+        t1 = match_to_update.get('team1_score', 0)
+        t2 = match_to_update.get('team2_score', 0)
+        update_payload['winner_team'] = 1 if t1 > t2 else 2
+    if 'game_value' in data:
+        update_payload['game_value'] = match_to_update['game_value']
+
+    updated = storage.update_match(match_id, update_payload)
+    if not updated:
+        return jsonify({'error': 'Failed to save match update'}), 500
+    match_to_update = updated
+
     # Recalculate MMR after match update
     # Since match details changed, we need to recalculate all MMR from scratch
     print(f"Match {match_id} updated, recalculating all MMR...")

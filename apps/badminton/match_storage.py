@@ -94,7 +94,8 @@ class MatchStorage:
                 game_value=match_data.get('game_value', 0.0),
                 winner_team=winner_team,
                 mmr_change=match_data.get('mmr_change', 0.0),
-                player_no_bet_status=match_data.get('player_no_bet_status', {})
+                player_no_bet_status=match_data.get('player_no_bet_status', {}),
+                birds_used=match_data.get('birds_used')
             )
             
             session.add(match)
@@ -137,6 +138,63 @@ class MatchStorage:
                 .all()
             return [self._match_to_dict(m) for m in matches]
     
+    def update_match(self, match_id: str, update_data: Dict) -> Optional[Dict]:
+        """
+        Update an existing match in the database.
+
+        Args:
+            match_id: Match ID string (e.g. 'match_42')
+            update_data: Dict of fields to update. Supported keys:
+                - team1: list of 2 player usernames
+                - team2: list of 2 player usernames
+                - team1_score: int
+                - team2_score: int
+                - winner_team: int (1 or 2)
+                - game_value: float
+
+        Returns:
+            Updated match dict, or None if not found.
+        """
+        with session_scope() as session:
+            try:
+                numeric_id = int(match_id.replace('match_', ''))
+            except (ValueError, AttributeError):
+                return None
+
+            match = session.query(MatchModel).filter_by(id=numeric_id).first()
+            if not match:
+                return None
+
+            if 'team1' in update_data:
+                team1 = update_data['team1']
+                p1 = session.query(User).filter_by(username=team1[0]).first()
+                p2 = session.query(User).filter_by(username=team1[1]).first()
+                if p1:
+                    match.team1_player1_id = p1.id
+                if p2:
+                    match.team1_player2_id = p2.id
+
+            if 'team2' in update_data:
+                team2 = update_data['team2']
+                p1 = session.query(User).filter_by(username=team2[0]).first()
+                p2 = session.query(User).filter_by(username=team2[1]).first()
+                if p1:
+                    match.team2_player1_id = p1.id
+                if p2:
+                    match.team2_player2_id = p2.id
+
+            if 'team1_score' in update_data:
+                match.team1_score = update_data['team1_score']
+            if 'team2_score' in update_data:
+                match.team2_score = update_data['team2_score']
+            if 'winner_team' in update_data:
+                match.winner_team = update_data['winner_team']
+            if 'game_value' in update_data:
+                match.game_value = update_data['game_value']
+
+            session.flush()
+            return self._match_to_dict(match)
+
     def delete_match(self, match_id: str) -> bool:
         """Delete a match by ID"""
         with session_scope() as session:
@@ -399,7 +457,8 @@ class MatchStorage:
             'team2_score': match.team2_score,
             'game_value': match.game_value,
             'winner': 'team1' if match.winner_team == 1 else 'team2',
-            'player_no_bet_status': match.player_no_bet_status or {}
+            'player_no_bet_status': match.player_no_bet_status or {},
+            'birds_used': match.birds_used
         }
     
     def _session_to_dict(self, sess: Session) -> Dict:

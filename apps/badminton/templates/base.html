@@ -44,7 +44,7 @@
             </li>
             <li class="mobile-nav-item">
                 <a class="mobile-nav-link" href="/badminton/profile" aria-label="Profile">
-                    <img src="/badminton/static/images/players.svg" alt="" class="mobile-nav-icon">
+                    <img src="/badminton/static/images/profile.svg" alt="" class="mobile-nav-icon">
                 </a>
             </li>
             <li class="mobile-nav-item">
@@ -60,11 +60,6 @@
             <li class="mobile-nav-item">
                 <a class="mobile-nav-link" href="/badminton/history" aria-label="History">
                     <img src="/badminton/static/images/history.svg" alt="" class="mobile-nav-icon">
-                </a>
-            </li>
-            <li class="mobile-nav-item">
-                <a class="mobile-nav-link" href="/badminton/stats" aria-label="Stats">
-                    <img src="/badminton/static/images/stats.svg" alt="" class="mobile-nav-icon">
                 </a>
             </li>
         </ul>
@@ -87,7 +82,6 @@
                 <li><a href="/badminton/players" {% if request.endpoint == 'players_page' %}class="active"{% endif %}>Players</a></li>
                 <li><a href="/badminton/matchups" {% if request.endpoint == 'matchups_page' %}class="active"{% endif %}>Matchups</a></li>
                 <li><a href="/badminton/history" {% if request.endpoint == 'history_page' %}class="active"{% endif %}>History</a></li>
-                <li><a href="/badminton/stats" {% if request.endpoint == 'stats_page' %}class="active"{% endif %}>Stats</a></li>
             </ul>
         </div>
     </nav>
