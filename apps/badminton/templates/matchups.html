@@ -32,11 +32,15 @@
                     <span class="mode-icon" aria-hidden="true">🤝</span>
                     <span>2v2</span>
                 </button>
+                <button type="button" id="btn-mode-preset" class="btn-mode" title="Preset - generate a full session schedule">
+                    <span class="mode-icon" aria-hidden="true">📋</span>
+                    <span>Preset</span>
+                </button>
             </div>
             
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <button type="button" id="btn-clear-selected" class="btn btn-secondary btn-small" disabled title="Clear selected players">Clear</button>
+                    <button type="button" id="btn-clear-selected" class="btn btn-secondary btn-small" title="Clear selected players">Clear</button>
                     <button type="button" id="btn-lock-toggle" class="btn-lock-toggle" style="display: none;" title="Lock/unlock teams">
                         <span id="lock-icon">🔓</span>
                     </button>
@@ -46,7 +50,38 @@
                 <div class="table-empty">Loading players...</div>
             </div>
         </div>
-        
+
+        <!-- Preset config panel (shown only in preset mode) -->
+        <div id="preset-config" style="display:none;">
+            <div class="preset-fields">
+                <label class="preset-field">
+                    <span>Hours to play</span>
+                    <input type="number" id="preset-hours" min="0.5" max="24" step="0.5" value="2" placeholder="2">
+                </label>
+            </div>
+            <div class="preset-bet-section">
+                <div class="preset-bet-cards">
+                    <button type="button" class="preset-bet-card active" id="preset-bet-static">
+                        <span class="pbc-title">Static</span>
+                        <span class="pbc-desc">Fixed stake for every game in the session.</span>
+                    </button>
+                    <button type="button" class="preset-bet-card" id="preset-bet-dynamic">
+                        <span class="pbc-title">Dynamic</span>
+                        <span class="pbc-desc">Stakes scale with loser's score — sub 10 = $3, sub 14 = $2, else $1.</span>
+                    </button>
+                </div>
+                <div id="preset-static-amounts" class="preset-static-amounts">
+                    <button type="button" class="btn-preset-amount active" data-value="1">$1</button>
+                    <button type="button" class="btn-preset-amount" data-value="2">$2</button>
+                    <button type="button" class="btn-preset-amount" data-value="3">$3</button>
+                </div>
+            </div>
+            <div id="preset-info" class="preset-info">Select players to see estimate</div>
+            <button type="button" id="btn-generate-preset" class="btn btn-primary" style="width:100%; margin-top:0.5rem;" disabled>
+                Generate Schedule
+            </button>
+        </div>
+
         <!-- Courts Container -->
         <div class="teams-bet-row" id="teamPreview">
             <div id="courts-container">
@@ -89,21 +124,6 @@
                         <div class="team team-b" data-team="b">
                             <input type="number" class="score-input score-b" id="court1-score-b" min="0" placeholder="0" aria-label="Court 1 Team B Score">
                             <div class="team-names" id="court1-teamB"></div>
-                        </div>
-                    </div>
-
-                    <div class="court-score-row">
-                        <div class="score-preset-group score-preset-group--a">
-                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="19">21-19</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="18">21-18</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="16">21-16</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="1" data-winner="a" data-loser-score="15">21-15</button>
-                        </div>
-                        <div class="score-preset-group score-preset-group--b">
-                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="19">19-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="18">18-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="16">16-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="1" data-winner="b" data-loser-score="15">15-21</button>
                         </div>
                     </div>
 
@@ -176,21 +196,6 @@
                         </div>
                     </div>
 
-                    <div class="court-score-row">
-                        <div class="score-preset-group score-preset-group--a">
-                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="19">21-19</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="18">21-18</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="16">21-16</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="2" data-winner="a" data-loser-score="15">21-15</button>
-                        </div>
-                        <div class="score-preset-group score-preset-group--b">
-                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="19">19-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="18">18-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="16">16-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="2" data-winner="b" data-loser-score="15">15-21</button>
-                        </div>
-                    </div>
-
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court2-betButtons">
                             <button type="button" class="btn-bet" data-court="2" data-value="0">$0</button>
@@ -257,21 +262,6 @@
                         <div class="team team-b" data-team="b">
                             <input type="number" class="score-input score-b" id="court3-score-b" min="0" placeholder="0" aria-label="Court 3 Team B Score">
                             <div class="team-names" id="court3-teamB"></div>
-                        </div>
-                    </div>
-
-                    <div class="court-score-row">
-                        <div class="score-preset-group score-preset-group--a">
-                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="19">21-19</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="18">21-18</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="16">21-16</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="3" data-winner="a" data-loser-score="15">21-15</button>
-                        </div>
-                        <div class="score-preset-group score-preset-group--b">
-                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="19">19-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="18">18-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="16">16-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="3" data-winner="b" data-loser-score="15">15-21</button>
                         </div>
                     </div>
 
@@ -344,21 +334,6 @@
                         </div>
                     </div>
 
-                    <div class="court-score-row">
-                        <div class="score-preset-group score-preset-group--a">
-                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="19">21-19</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="18">21-18</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="16">21-16</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="4" data-winner="a" data-loser-score="15">21-15</button>
-                        </div>
-                        <div class="score-preset-group score-preset-group--b">
-                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="19">19-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="18">18-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="16">16-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="4" data-winner="b" data-loser-score="15">15-21</button>
-                        </div>
-                    </div>
-
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court4-betButtons">
                             <button type="button" class="btn-bet" data-court="4" data-value="0">$0</button>
@@ -428,21 +403,6 @@
                         </div>
                     </div>
 
-                    <div class="court-score-row">
-                        <div class="score-preset-group score-preset-group--a">
-                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="19">21-19</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="18">21-18</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="16">21-16</button>
-                            <button type="button" class="btn-score-preset team-a-win" data-court="5" data-winner="a" data-loser-score="15">21-15</button>
-                        </div>
-                        <div class="score-preset-group score-preset-group--b">
-                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="19">19-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="18">18-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="16">16-21</button>
-                            <button type="button" class="btn-score-preset team-b-win" data-court="5" data-winner="b" data-loser-score="15">15-21</button>
-                        </div>
-                    </div>
-
                     <div class="court-bet-row">
                         <div class="bet-button-group" id="court5-betButtons">
                             <button type="button" class="btn-bet" data-court="5" data-value="0">$0</button>
@@ -470,10 +430,20 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Preset schedule (outside courts-container so it isn't hidden with it) -->
+            <div id="preset-schedule-container" style="display:none;">
+                <div class="preset-schedule-header">
+                    <span class="preset-schedule-title">Schedule</span>
+                    <button type="button" id="btn-clear-preset" class="btn btn-secondary btn-small">Clear</button>
+                </div>
+                <div id="preset-schedule-table-wrap"></div>
+                <div id="preset-stats"></div>
+            </div>
         </div>
         </div>
     </div>
-    
+
     <!-- Match Data Carousel Card -->
             <div class="card card--history">
                 <div class="card-header">

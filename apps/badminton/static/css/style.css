@@ -2101,60 +2101,6 @@ th.sortable-col.sort-active .sort-indicator {
     display: block;
 }
 
-/* Court score preset row - quick score buttons */
-.court-score-row {
-    display: flex;
-    gap: 0.4rem;
-    margin-top: 0.5rem;
-    margin-bottom: 0.25rem;
-    flex-wrap: nowrap;
-}
-
-.score-preset-group {
-    display: flex;
-    gap: 0.3rem;
-    flex: 1;
-}
-
-.score-preset-group--a {
-    justify-content: flex-start;
-}
-
-.score-preset-group--b {
-    justify-content: flex-end;
-}
-
-.btn-score-preset {
-    padding: 0.35rem 0.5rem;
-    background-color: var(--gm-700);
-    border: 2px solid var(--gm-600, #5A6165);
-    border-radius: 6px;
-    font-size: 0.775rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
-    white-space: nowrap;
-}
-
-.btn-score-preset:hover {
-    color: var(--text);
-}
-
-.btn-score-preset.team-a-win:hover,
-.btn-score-preset.team-a-win.selected {
-    background-color: var(--team-a);
-    border-color: var(--team-a);
-    color: #fff;
-}
-
-.btn-score-preset.team-b-win:hover,
-.btn-score-preset.team-b-win.selected {
-    background-color: var(--team-b);
-    border-color: var(--team-b);
-    color: #fff;
-}
-
 /* Court bet row - per-court bet selection */
 .court-bet-row {
     margin-top: 0.75rem;
@@ -2594,7 +2540,8 @@ th.sortable-col.sort-active .sort-indicator {
 .player-name-btn.court-2,
 .player-name-btn.court-3,
 .player-name-btn.court-4,
-.player-name-btn.court-5 {
+.player-name-btn.court-5,
+.player-name-btn.preset-numbered {
     padding-left: 2.5rem;
 }
 
@@ -4811,7 +4758,6 @@ td .date-design {
     .card--entry,
     .court-section,
     .court-row,
-    .court-score-row,
     .court-bet-row,
     .court-birds-row,
     .court-scenario-tabs {
@@ -4950,38 +4896,6 @@ td .date-design {
         flex-shrink: 0 !important;
     }
 
-    /* ── Score preset row: red under red team, blue under blue team ─────── */
-    .court-score-row {
-        flex-direction: row !important;
-        margin-top: 0.2rem !important;
-        margin-bottom: 0.1rem !important;
-        gap: 0 !important;
-    }
-
-    .score-preset-group {
-        gap: 0.15rem !important;
-        flex: 1 !important;
-    }
-
-    /* A gap in the centre matching the VS icon + score-input area */
-    .score-preset-group--a {
-        justify-content: flex-start !important;
-        padding-right: 0.3rem !important;
-    }
-
-    .score-preset-group--b {
-        justify-content: flex-end !important;
-        padding-left: 0.3rem !important;
-    }
-
-    .btn-score-preset {
-        flex: 1 !important;
-        padding: 0.15rem 0 !important;
-        font-size: 0.55rem !important;
-        text-align: center !important;
-        min-width: 0 !important;
-    }
-
     /* ── Bet + birds: compact stacked rows ──────────────────────────────── */
     .court-bet-row {
         margin-top: 0.25rem !important;
@@ -5045,4 +4959,611 @@ td .date-design {
     .session-info-content {
         font-size: 0.75rem !important;
     }
+
+    /* ── Preset config panel ─────────────────────────────────────────────── */
+    #preset-config {
+        padding: 0 !important;
+    }
+
+    .preset-fields {
+        margin-bottom: 0.35rem !important;
+    }
+
+    .preset-field span {
+        font-size: 0.78rem !important;
+    }
+
+    .preset-field input {
+        padding: 0.25rem 0.4rem !important;
+        font-size: 0.85rem !important;
+    }
+
+    .preset-bet-section {
+        margin: 0.35rem 0 !important;
+    }
+
+    .preset-bet-cards {
+        gap: 0.35rem !important;
+        margin-bottom: 0.35rem !important;
+    }
+
+    .preset-bet-card {
+        padding: 0.4rem 0.5rem !important;
+    }
+
+    .pbc-title {
+        font-size: 0.8rem !important;
+    }
+
+    .pbc-desc {
+        font-size: 0.68rem !important;
+    }
+
+    .preset-info {
+        font-size: 0.75rem !important;
+        margin-bottom: 0.3rem !important;
+    }
+
+    /* ── Preset schedule header ─────────────────────────────────────────── */
+    .preset-schedule-header {
+        margin-bottom: 0.3rem !important;
+    }
+
+    .preset-schedule-title {
+        font-size: 0.85rem !important;
+    }
+
+    /* ── Preset cards (card-based layout, no table) ──────────────────────── */
+    .preset-round {
+        margin-bottom: 0.75rem !important;
+    }
+
+    .preset-match-card {
+        padding: 0.4rem 0.5rem !important;
+        margin-bottom: 0.25rem !important;
+    }
+
+    /* Grid: #N top-left, Submit top-right, teams + VS on second row */
+    .preset-court-row {
+        display: grid !important;
+        grid-template-columns: 1fr auto 1fr !important;
+        grid-template-rows: auto auto !important;
+        gap: 0.25rem 0.25rem !important;
+        align-items: center !important;
+    }
+
+    .preset-match-num {
+        grid-column: 1 !important;
+        grid-row: 1 !important;
+        font-size: 0.65rem !important;
+        align-self: center !important;
+    }
+
+    .preset-court-row .btn-preset-submit {
+        grid-column: 3 !important;
+        grid-row: 1 !important;
+        justify-self: end !important;
+    }
+
+    .preset-team-a {
+        grid-column: 1 !important;
+        grid-row: 2 !important;
+    }
+
+    .preset-vs {
+        grid-column: 2 !important;
+        grid-row: 2 !important;
+        align-self: center !important;
+        font-size: 0.6rem !important;
+    }
+
+    .preset-team-b {
+        grid-column: 3 !important;
+        grid-row: 2 !important;
+    }
+
+    .preset-team {
+        padding: 0.3rem 0.35rem !important;
+        gap: 0.3rem !important;
+        min-height: 38px !important;
+        min-width: 0 !important;
+    }
+
+    .preset-team-names {
+        font-size: 0.78rem !important;
+    }
+
+    .preset-score-input {
+        width: 38px !important;
+        padding: 0.2rem 0.15rem !important;
+        font-size: 0.78rem !important;
+        flex-shrink: 0 !important;
+    }
+
+    .preset-sitout-row {
+        padding: 0.15rem 0.25rem !important;
+        font-size: 0.72rem !important;
+    }
+
+    .preset-sitout-names {
+        font-size: 0.72rem !important;
+    }
+
+    .btn-preset-submit {
+        padding: 0.25rem 0.4rem !important;
+        font-size: 0.72rem !important;
+        white-space: nowrap !important;
+    }
+
+    /* ── Preset stats ────────────────────────────────────────────────────── */
+    .preset-stats-summary {
+        gap: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    .preset-stat-label {
+        font-size: 0.68rem !important;
+    }
+
+    .preset-stat-value {
+        font-size: 1rem !important;
+    }
+
+    .preset-player-table {
+        font-size: 0.75rem !important;
+    }
+}
+
+/* ── Preset mode ──────────────────────────────────────────────────────────── */
+
+#preset-config {
+    padding: 0.75rem 0 0.25rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.5rem;
+}
+
+.preset-fields {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.preset-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.preset-field span {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.preset-field input {
+    padding: 0.45rem 0.6rem;
+    background: var(--gm-700);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.95rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.preset-field input:focus {
+    outline: none;
+    border-color: var(--primary, #4f9eff);
+}
+
+.preset-info {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 0.2rem 0 0.1rem;
+}
+
+/* Preset schedule table */
+#preset-schedule-container {
+    margin-top: 0.25rem;
+}
+
+/* ── Preset bet mode selector ──────────────────────────────────────────────── */
+
+.preset-bet-section {
+    margin: 0.6rem 0;
+}
+
+.preset-bet-cards {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.preset-bet-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--gm-700);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.preset-bet-card:hover:not(.active) {
+    background: var(--gm-800);
+    border-color: var(--dg-500);
+}
+
+.preset-bet-card.active {
+    background: var(--dg-700);
+    border-color: var(--dg-500);
+    box-shadow: 0 0 0 2px rgba(64, 145, 108, 0.3);
+}
+
+.pbc-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.pbc-desc {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.preset-static-amounts {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.btn-preset-amount {
+    padding: 0.3rem 0.85rem;
+    background: var(--gm-700);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.btn-preset-amount:hover:not(.active) {
+    background: var(--gm-800);
+    border-color: var(--dg-500);
+}
+
+.btn-preset-amount.active {
+    background: var(--dg-700);
+    border-color: var(--dg-500);
+    color: var(--text);
+    box-shadow: 0 0 0 2px rgba(64, 145, 108, 0.3);
+}
+
+/* ── ──────────────────────────────────────────────────────────────────────── */
+
+.preset-schedule-wrap {
+    overflow-x: auto;
+}
+
+.preset-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    table-layout: auto;
+}
+
+.preset-table th {
+    text-align: left;
+    padding: 0.4rem 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.preset-table td {
+    padding: 0.9rem 0.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    vertical-align: middle;
+}
+
+/* Spacer row between rounds — creates breathing room between court groups */
+.preset-table tr.round-spacer td {
+    padding: 0;
+    height: 12px;
+    border-bottom: none;
+    background: transparent;
+}
+
+.preset-table tr.round-spacer + tr td {
+    border-top: 3px solid var(--border);
+}
+
+.preset-table tr.submitted td {
+    opacity: 0.65;
+}
+
+.preset-num {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.preset-team-cell {
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.preset-team-cell .team-cell-inner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.preset-team-cell span.team-label {
+    flex: 1;
+    min-width: 0;
+    padding: 0.3rem 0.55rem;
+    border-radius: 6px;
+    transition: background 0.12s, color 0.12s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.preset-team-cell.winner span.team-label {
+    background: var(--primary, #4f9eff);
+    color: #fff;
+}
+
+.preset-score-input {
+    width: 52px;
+    flex-shrink: 0;
+    padding: 0.35rem 0.4rem;
+    background: var(--gm-700);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85rem;
+    text-align: center;
+    cursor: text;
+    user-select: text;
+}
+
+.preset-score-input:focus {
+    outline: none;
+    border-color: var(--primary, #4f9eff);
+}
+
+/* Out column — muted, vertically centred for rowspan */
+.preset-out {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    vertical-align: middle;
+    text-align: center;
+}
+
+/* Round separator handled by spacer rows in JS — keep class stub for safety */
+.preset-table tr td.round-start,
+.preset-table tr th.round-start {}
+
+
+.btn-preset-submit {
+    padding: 0.22rem 0.65rem;
+    background: var(--primary, #4f9eff);
+    border: none;
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    transition: opacity 0.1s, background 0.15s;
+    white-space: nowrap;
+}
+
+.btn-preset-submit:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.btn-preset-submit.done {
+    background: var(--success, #22c55e);
+}
+
+/* Preset stats */
+#preset-stats {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.preset-stats-summary {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+
+.preset-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.preset-stat-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+}
+
+.preset-stat-value {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.preset-player-table {
+    width: 100%;
+    font-size: 0.82rem;
+    border-collapse: collapse;
+}
+
+.preset-player-table th {
+    text-align: left;
+    padding: 0.25rem 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+}
+
+.preset-player-table td {
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.preset-player-table td:not(:first-child) {
+    text-align: center;
+    color: var(--text-muted);
+}
+
+/* ── Preset card layout ───────────────────────────────────────────────────── */
+
+.preset-schedule-wrap {
+    display: flex;
+    flex-direction: column;
+}
+
+.preset-round {
+    margin-bottom: 1.1rem;
+}
+
+.preset-round:last-child {
+    margin-bottom: 0;
+}
+
+.preset-match-card {
+    background: var(--gm-800);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.3rem;
+    transition: opacity 0.2s;
+}
+
+.preset-match-card.submitted {
+    opacity: 0.6;
+}
+
+.preset-match-num {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.preset-court-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.preset-team {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    min-height: 44px;
+    transition: background 0.15s, border-color 0.15s;
+    min-width: 0;
+}
+
+.preset-team-a {
+    background: rgba(231, 111, 81, 0.1);
+    border-color: rgba(231, 111, 81, 0.3);
+    flex-direction: row;
+}
+
+.preset-team-b {
+    background: rgba(74, 144, 226, 0.1);
+    border-color: rgba(74, 144, 226, 0.3);
+    flex-direction: row-reverse;
+}
+
+.preset-team.winner.preset-team-a {
+    background: rgba(231, 111, 81, 0.28);
+    border-color: var(--team-a);
+}
+
+.preset-team.winner.preset-team-b {
+    background: rgba(74, 144, 226, 0.28);
+    border-color: var(--team-b);
+}
+
+.preset-team-names {
+    flex: 1;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.preset-vs {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    letter-spacing: 0.06em;
+    align-self: center;
+}
+
+.preset-sitout-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.78rem;
+}
+
+.preset-sitout-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    background: var(--gm-700);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+}
+
+.preset-sitout-names {
+    color: var(--text-muted);
+    font-size: 0.8rem;
 }

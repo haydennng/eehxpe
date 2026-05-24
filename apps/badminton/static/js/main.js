@@ -956,6 +956,13 @@ function getRequiredCourts() {
 
 let activePlayersCount = 0; // Track active player count
 
+// Preset mode state
+let modePreset = false;
+let presetSchedule = []; // [{game_num, team1, team2, sitters, match_id, winner, team1_score, team2_score}]
+let presetNumCourts = 1;
+let presetBetMode = 'static';  // 'static' | 'dynamic'
+let presetStaticBet = 1;
+
 // 2v2 mode state
 let mode2v2 = false; // false = Free For All, true = 2v2
 let teamsLocked = false; // Lock state for 2v2 mode
@@ -968,6 +975,7 @@ const STORAGE_KEY_MODE = 'badminton_mode_2v2';
 const STORAGE_KEY_SELECTED = 'badminton_selected_players';
 const STORAGE_KEY_LOCKED = 'badminton_teams_locked';
 const STORAGE_KEY_LOCKED_TEAMS = 'badminton_locked_teams';
+const STORAGE_KEY_PRESET = 'badminton_preset_schedule';
 // currentScenarios holds the scenario arrays returned by /api/scenarios
 // Shape: { competitive: [{team1:[...], team2:[...]}, ...], balanced: [...], random: [...] }
 // Each array is a flat list of court matchup objects (index = court position, 0-based).
@@ -998,6 +1006,9 @@ async function initMatchups() {
         restoreState();
         applyRestoredState();
         console.log('State restored');
+
+        // Sync preset schedule from server (overwrites localStorage — server is source of truth)
+        loadPresetStateFromServer();
 
         // Load scenarios immediately after players/courts are ready, before other slow loads
         await loadScenarios();
@@ -1100,40 +1111,14 @@ async function initMatchups() {
             const scoreB = qs(`#court${i}-score-b`);
 
             if (scoreA && scoreB) {
-                const clearPresets = () => qsa(`.btn-score-preset[data-court="${i}"]`).forEach(b => b.classList.remove('selected'));
-                scoreA.addEventListener('input', () => { clearPresets(); validateCourt(i); });
-                scoreB.addEventListener('input', () => { clearPresets(); validateCourt(i); });
+                scoreA.addEventListener('input', () => validateCourt(i));
+                scoreB.addEventListener('input', () => validateCourt(i));
             } else if (i === 1) {
                 console.warn(`Court ${i} score inputs not found - this may affect form validation`);
             }
         }
 
-        // Set up quick score preset buttons
-        qsa('.btn-score-preset').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const courtNum = parseInt(btn.dataset.court);
-                const winner = btn.dataset.winner; // 'a' or 'b'
-                const loserScore = parseInt(btn.dataset.loserScore);
-                const scoreA = qs(`#court${courtNum}-score-a`);
-                const scoreB = qs(`#court${courtNum}-score-b`);
 
-                if (!scoreA || !scoreB) return;
-
-                if (winner === 'a') {
-                    scoreA.value = 21;
-                    scoreB.value = loserScore;
-                } else {
-                    scoreA.value = loserScore;
-                    scoreB.value = 21;
-                }
-
-                // Highlight selected preset, clear others for this court
-                qsa(`.btn-score-preset[data-court="${courtNum}"]`).forEach(b => b.classList.remove('selected'));
-                btn.classList.add('selected');
-
-                validateCourt(courtNum);
-            });
-        });
 
         // Set up record and clear court buttons for all courts dynamically
         for (let i = 1; i <= MAX_COURTS; i++) {
@@ -1167,10 +1152,56 @@ async function initMatchups() {
         // Set up mode selection handlers
         const btnModeFFA = qs('#btn-mode-ffa');
         const btnMode2v2 = qs('#btn-mode-2v2');
+        const btnModePreset = qs('#btn-mode-preset');
         if (btnModeFFA && btnMode2v2) {
             btnModeFFA.addEventListener('click', () => switchMode(false));
             btnMode2v2.addEventListener('click', () => switchMode(true));
         }
+        if (btnModePreset) {
+            btnModePreset.addEventListener('click', () => activatePresetMode());
+        }
+
+        // Preset generate button
+        const btnGeneratePreset = qs('#btn-generate-preset');
+        if (btnGeneratePreset) {
+            btnGeneratePreset.addEventListener('click', generatePresetSchedule);
+        }
+
+        // Preset clear button
+        const btnClearPreset = qs('#btn-clear-preset');
+        if (btnClearPreset) {
+            btnClearPreset.addEventListener('click', clearPresetSchedule);
+        }
+
+
+        // Preset input change → update estimate
+        qs('#preset-hours')?.addEventListener('input', updatePresetInfo);
+
+        // Bet mode card toggles
+        qs('#preset-bet-static')?.addEventListener('click', () => {
+            presetBetMode = 'static';
+            qs('#preset-bet-static')?.classList.add('active');
+            qs('#preset-bet-dynamic')?.classList.remove('active');
+            qs('#preset-static-amounts').style.display = 'flex';
+            savePresetSchedule();
+        });
+        qs('#preset-bet-dynamic')?.addEventListener('click', () => {
+            presetBetMode = 'dynamic';
+            qs('#preset-bet-dynamic')?.classList.add('active');
+            qs('#preset-bet-static')?.classList.remove('active');
+            qs('#preset-static-amounts').style.display = 'none';
+            savePresetSchedule();
+        });
+
+        // Static bet amount buttons
+        qsa('.btn-preset-amount').forEach(btn => {
+            btn.addEventListener('click', () => {
+                qsa('.btn-preset-amount').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                presetStaticBet = parseInt(btn.dataset.value);
+                savePresetSchedule();
+            });
+        });
         
         // Set up lock toggle handler
         const btnLockToggle = qs('#btn-lock-toggle');
@@ -1459,17 +1490,15 @@ function togglePlayerSelection(btn) {
     
     // Determine max selections based on mode
     let maxSelected;
-    if (mode2v2) {
-        // In 2v2 mode, can select up to 8 players (4 teams of 2)
+    if (modePreset) {
+        // Preset mode: allow selecting all active players (generator handles sit-outs)
+        maxSelected = activePlayersCount;
+    } else if (mode2v2) {
         maxSelected = 8;
     } else {
-        // In Free For All mode, cap selections to exactly the players needed
-        // for the number of courts derived from the active player count.
-        // e.g. 4–7 active players → 1 court → max 4 selections
-        //      8–11 active players → 2 courts → max 8 selections
         maxSelected = getRequiredCourts() * 4;
     }
-    
+
     if (isSelected) {
         // Deselect
         selectedPlayers = selectedPlayers.filter(p => p !== player);
@@ -1528,12 +1557,15 @@ function togglePlayerSelection(btn) {
     
     // Update disabled states and clear button
     updatePlayerButtonStates();
-    
-    // Update team colors (different logic for 2v2)
-    updateTeamColors();
-    updateTeamPreview();
+
+    if (modePreset) {
+        updatePresetInfo(); // handles badge colors + numbers
+    } else {
+        updateTeamColors();
+        updateTeamPreview();
+    }
     updateLockButtonVisibility();
-    
+
     // Clear or show recommendation explanation based on mode
     updateRecommendationExplanation();
 
@@ -1546,8 +1578,11 @@ function togglePlayerSelection(btn) {
 
 // Switch between Free For All and 2v2 mode
 function switchMode(to2v2) {
-    // Don't switch if already in that mode
-    if (mode2v2 === to2v2) return;
+    // If in preset mode, leave it first (don't early-return — mode2v2 may not match)
+    const wasPreset = modePreset;
+    if (modePreset) deactivatePresetMode();
+    // Don't switch if already in that mode (unless we just left preset)
+    if (!wasPreset && mode2v2 === to2v2) return;
     
     // Update mode state
     mode2v2 = to2v2;
@@ -1561,7 +1596,8 @@ function switchMode(to2v2) {
     const btnMode2v2 = qs('#btn-mode-2v2');
     const lockBtn = qs('#btn-lock-toggle');
     const lockIcon = qs('#lock-icon');
-    
+
+    qs('#btn-mode-preset')?.classList.remove('active');
     if (to2v2) {
         btnMode2v2?.classList.add('active');
         btnModeFFA?.classList.remove('active');
@@ -1627,7 +1663,7 @@ function updateRecommendationExplanation() {
 // Save current state to localStorage
 function saveState() {
     try {
-        localStorage.setItem(STORAGE_KEY_MODE, mode2v2 ? '1' : '0');
+        localStorage.setItem(STORAGE_KEY_MODE, modePreset ? 'preset' : (mode2v2 ? '1' : '0'));
         localStorage.setItem(STORAGE_KEY_SELECTED, JSON.stringify(selectedPlayers));
         localStorage.setItem(STORAGE_KEY_LOCKED, teamsLocked ? '1' : '0');
         localStorage.setItem(STORAGE_KEY_LOCKED_TEAMS, JSON.stringify(lockedTeams));
@@ -1641,8 +1677,21 @@ function restoreState() {
     try {
         // Restore mode
         const savedMode = localStorage.getItem(STORAGE_KEY_MODE);
-        if (savedMode !== null) {
+        if (savedMode === 'preset') {
+            modePreset = true;
+            mode2v2 = false;
+        } else if (savedMode !== null) {
             mode2v2 = savedMode === '1';
+        }
+
+        // Restore preset schedule
+        const savedPreset = localStorage.getItem(STORAGE_KEY_PRESET);
+        if (savedPreset) {
+            const p = JSON.parse(savedPreset);
+            presetSchedule = p.schedule || [];
+            presetNumCourts = p.numCourts || 1;
+            presetBetMode = p.betMode || 'static';
+            presetStaticBet = p.staticBet || 1;
         }
         
         // Restore selected players
@@ -1675,15 +1724,43 @@ function applyRestoredState() {
     // Update mode buttons
     const btnModeFFA = qs('#btn-mode-ffa');
     const btnMode2v2 = qs('#btn-mode-2v2');
-    
-    if (mode2v2) {
+
+    if (modePreset) {
+        qs('#btn-mode-preset')?.classList.add('active');
+        btnModeFFA?.classList.remove('active');
+        btnMode2v2?.classList.remove('active');
+        // Show preset panels, hide courts
+        const courtsContainer = qs('#courts-container');
+        if (courtsContainer) courtsContainer.style.display = 'none';
+        const presetConfig = qs('#preset-config');
+        if (presetConfig) presetConfig.style.display = 'block';
+        // Re-run auto-select so badges render correctly after players load
+        selectedPlayers = allPlayers
+            .filter(p => {
+                const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
+                const isDeactivated = typeof p === 'object' && p.deactivated === true;
+                return isActive && !isDeactivated;
+            })
+            .map(p => typeof p === 'string' ? p : p.name);
+        updatePresetBadges();
+        updatePresetInfo();
+        applyBetModeUI();
+        // Restore saved schedule if one exists
+        if (presetSchedule.length) {
+            renderPresetTable();
+            updatePresetStats();
+            const schedEl = qs('#preset-schedule-container');
+            if (schedEl) schedEl.style.display = 'block';
+        }
+        return;
+    } else if (mode2v2) {
         btnMode2v2?.classList.add('active');
         btnModeFFA?.classList.remove('active');
     } else {
         btnModeFFA?.classList.add('active');
         btnMode2v2?.classList.remove('active');
     }
-    
+
     // Apply selection to player buttons
     selectedPlayers.forEach((player, index) => {
         const btn = Array.from(qsa('.player-name-btn')).find(b => b.dataset.player === player);
@@ -2336,18 +2413,15 @@ async function ensureSelectionCount() {
 function updatePlayerButtonStates() {
     const clearBtn = qs('#btn-clear-selected');
     
-    // Enable/disable clear button based on selection
-    if (clearBtn) {
-        clearBtn.disabled = selectedPlayers.length === 0;
-    }
+    if (clearBtn) clearBtn.disabled = false;
     
     // Determine max selections based on mode
     let maxSelected;
-    if (mode2v2) {
-        // In 2v2 mode, can select up to 8 players (4 teams of 2)
+    if (modePreset) {
+        maxSelected = activePlayersCount;
+    } else if (mode2v2) {
         maxSelected = 8;
     } else {
-        // In Free For All mode, allow up to MAX_COURTS * 4 players (up to 5 courts = 20 players)
         maxSelected = MAX_COURTS * 4;
     }
     
@@ -2454,16 +2528,14 @@ function clearSelectedPlayers() {
         if (birdsPlusBtn) birdsPlusBtn.classList.remove('active');
         selectBirds(i, 1);
 
-        // Reset score preset buttons for this court
-        qsa(`.btn-score-preset[data-court="${i}"]`).forEach(btn => btn.classList.remove('selected'));
-
         // Validate court (should disable record button)
         validateCourt(i);
     }
     
     // Clear selection from name buttons (pills)
     qsa('.player-name-btn').forEach(btn => {
-        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
+        btn.classList.remove('selected', 'team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5', 'preset-numbered');
+        btn.removeAttribute('data-court-number');
         btn.setAttribute('aria-pressed', 'false');
         // Remove temporary disabled state
         if (btn.getAttribute('data-temp-disabled') === 'true') {
@@ -2483,6 +2555,7 @@ function clearSelectedPlayers() {
     updatePlayerButtonStates();
     updateTeamPreview();
     updateLockButtonVisibility();
+    if (modePreset) updatePresetInfo();
     
     // Save state
     saveState();
@@ -3805,12 +3878,13 @@ async function deleteMatchFromHistory(matchId) {
     if (!confirm('Are you sure you want to delete this match?')) {
         return;
     }
-    
+
     try {
         await api(`./api/matches/${matchId}`, {
             method: 'DELETE'
         });
-        
+
+        revertPresetGame(matchId);
         toast('Match deleted successfully');
         await loadMatchHistory();
         await loadSessionStats();
@@ -5653,8 +5727,9 @@ async function deleteMatch(sessionId, matchId) {
             method: 'DELETE'
         });
         
+        revertPresetGame(matchId);
         toast('Game deleted successfully');
-        
+
         // Reload session data
         await loadSessionMatches(sessionId);
         await loadSessionEarnings(sessionId);
@@ -6361,7 +6436,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (pageInitializers[page]) {
         pageInitializers[page]();
     }
-    
+
     // Initialize drag scroll for matchups page
     if (page === 'matchups') {
         initDragScroll();
@@ -6369,3 +6444,550 @@ document.addEventListener('DOMContentLoaded', () => {
         initCourtsSelector();
     }
 });
+
+// ── Preset mode ───────────────────────────────────────────────────────────────
+
+function activatePresetMode() {
+    if (modePreset) return;
+    modePreset = true;
+    mode2v2 = false;
+
+    // Update mode buttons
+    qs('#btn-mode-ffa')?.classList.remove('active');
+    qs('#btn-mode-2v2')?.classList.remove('active');
+    qs('#btn-mode-preset')?.classList.add('active');
+
+    // Hide courts container, show preset panels
+    const courtsContainer = qs('#courts-container');
+    if (courtsContainer) courtsContainer.style.display = 'none';
+    const presetConfig = qs('#preset-config');
+    if (presetConfig) presetConfig.style.display = 'block';
+
+    // Reset lock button
+    const lockBtn = qs('#btn-lock-toggle');
+    if (lockBtn) lockBtn.style.display = 'none';
+
+    // Auto-select all active (non-deactivated) players
+    selectedPlayers = allPlayers
+        .filter(p => {
+            const isActive = typeof p === 'string' ? true : (p.active !== undefined ? p.active : true);
+            const isDeactivated = typeof p === 'object' && p.deactivated === true;
+            return isActive && !isDeactivated;
+        })
+        .map(p => typeof p === 'string' ? p : p.name);
+
+    // Reset all pill classes then apply preset state
+    qsa('.player-name-btn').forEach(btn => {
+        btn.classList.remove('team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5', 'locked-inactive');
+        btn.removeAttribute('data-temp-disabled');
+        const playerName = btn.dataset.player;
+        const player = allPlayers.find(p => (typeof p === 'string' ? p : p.name) === playerName);
+        const isActive = typeof player === 'string' ? true : (player?.active !== undefined ? player.active : true);
+        const isDeactivated = typeof player === 'object' && player.deactivated === true;
+        btn.disabled = !isActive || isDeactivated;
+    });
+
+    updatePlayerButtonStates();
+    updatePresetInfo();
+    applyBetModeUI();
+
+    // Restore schedule if one exists (switching back from another mode)
+    if (presetSchedule.length) {
+        renderPresetTable();
+        updatePresetStats();
+        const schedEl = qs('#preset-schedule-container');
+        if (schedEl) schedEl.style.display = 'block';
+    }
+
+    saveState();
+    toast('Mode switched to Preset');
+}
+
+function deactivatePresetMode() {
+    if (!modePreset) return;
+    modePreset = false;
+    // Keep presetSchedule in memory — restored when switching back to preset
+
+    // Clean up preset-only attributes/classes from player pills
+    qsa('.player-name-btn').forEach(btn => {
+        btn.removeAttribute('data-court-number');
+        btn.classList.remove('preset-numbered', 'selected', 'team-b');
+        btn.setAttribute('aria-pressed', 'false');
+    });
+
+    const courtsContainer = qs('#courts-container');
+    if (courtsContainer) courtsContainer.style.display = '';
+    const presetConfig = qs('#preset-config');
+    if (presetConfig) presetConfig.style.display = 'none';
+    const presetSched = qs('#preset-schedule-container');
+    if (presetSched) presetSched.style.display = 'none';
+}
+
+function revertPresetGame(matchId) {
+    const idx = presetSchedule.findIndex(g => g.match_id === matchId);
+    if (idx === -1) return;
+    presetSchedule[idx].match_id = null;
+    savePresetSchedule();
+    renderPresetTable();
+    updatePresetStats();
+}
+
+function applyBetModeUI() {
+    const isDynamic = presetBetMode === 'dynamic';
+    qs('#preset-bet-static')?.classList.toggle('active', !isDynamic);
+    qs('#preset-bet-dynamic')?.classList.toggle('active', isDynamic);
+    const amountsEl = qs('#preset-static-amounts');
+    if (amountsEl) amountsEl.style.display = isDynamic ? 'none' : 'flex';
+    qsa('.btn-preset-amount').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.value) === presetStaticBet);
+    });
+}
+
+let _presetSaveTimer = null;
+
+function savePresetSchedule() {
+    const payload = {
+        schedule: presetSchedule,
+        numCourts: presetNumCourts,
+        betMode: presetBetMode,
+        staticBet: presetStaticBet,
+    };
+    // Fast local save
+    try { localStorage.setItem(STORAGE_KEY_PRESET, JSON.stringify(payload)); } catch (e) {}
+    // Debounced server sync (800ms after last change)
+    clearTimeout(_presetSaveTimer);
+    _presetSaveTimer = setTimeout(() => _syncPresetToServer(payload), 800);
+}
+
+async function _syncPresetToServer(payload) {
+    try {
+        await fetch('/badminton/api/preset/state', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: presetSchedule.length ? payload : null }),
+        });
+    } catch (e) {
+        console.warn('Failed to sync preset state to server:', e);
+    }
+}
+
+async function loadPresetStateFromServer() {
+    try {
+        const resp = await fetch('/badminton/api/preset/state');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.state) {
+            const p = data.state;
+            presetSchedule = p.schedule || [];
+            presetNumCourts = p.numCourts || 1;
+            presetBetMode = p.betMode || 'static';
+            presetStaticBet = p.staticBet || 1;
+            try { localStorage.setItem(STORAGE_KEY_PRESET, JSON.stringify(p)); } catch (e) {}
+        } else {
+            presetSchedule = [];
+            presetNumCourts = 1;
+            presetBetMode = 'static';
+            presetStaticBet = 1;
+            localStorage.removeItem(STORAGE_KEY_PRESET);
+        }
+        // Re-render if in preset mode
+        if (modePreset) {
+            applyBetModeUI();
+            if (presetSchedule.length) {
+                renderPresetTable();
+                updatePresetStats();
+                const schedEl = qs('#preset-schedule-container');
+                if (schedEl) schedEl.style.display = 'block';
+            } else {
+                const wrap = qs('#preset-schedule-table-wrap');
+                if (wrap) wrap.innerHTML = '<p class="table-empty">No schedule generated yet.</p>';
+                const statsEl = qs('#preset-stats');
+                if (statsEl) statsEl.innerHTML = '';
+                const schedEl = qs('#preset-schedule-container');
+                if (schedEl) schedEl.style.display = 'none';
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load preset state from server:', e);
+    }
+}
+
+function clearPresetSchedule() {
+    presetSchedule = [];
+    presetNumCourts = 1;
+    presetBetMode = 'static';
+    presetStaticBet = 1;
+    localStorage.removeItem(STORAGE_KEY_PRESET);
+    // Clear on server too
+    fetch('/badminton/api/preset/state', { method: 'DELETE' }).catch(() => {});
+    const wrap = qs('#preset-schedule-table-wrap');
+    if (wrap) wrap.innerHTML = '';
+    const statsEl = qs('#preset-stats');
+    if (statsEl) statsEl.innerHTML = '';
+    const schedEl = qs('#preset-schedule-container');
+    if (schedEl) schedEl.style.display = 'none';
+}
+
+function updatePresetBadges() {
+    if (!modePreset) return;
+    qsa('.player-name-btn').forEach(btn => {
+        const playerName = btn.dataset.player;
+        const idx = selectedPlayers.indexOf(playerName);
+        btn.classList.remove('team-a', 'team-b', 'team-c', 'team-d', 'court-1', 'court-2', 'court-3', 'court-4', 'court-5');
+        if (idx >= 0) {
+            // Show sequential number as the left-side watermark
+            btn.setAttribute('data-court-number', String(idx + 1));
+            btn.classList.add('selected', 'team-b', 'preset-numbered');
+            btn.setAttribute('aria-pressed', 'true');
+        } else {
+            btn.removeAttribute('data-court-number');
+            btn.classList.remove('selected', 'preset-numbered');
+            btn.setAttribute('aria-pressed', 'false');
+        }
+    });
+}
+
+function updatePresetInfo() {
+    if (!modePreset) return;
+    const infoEl = qs('#preset-info');
+    const generateBtn = qs('#btn-generate-preset');
+    const hoursEl = qs('#preset-hours');
+    if (!infoEl || !generateBtn) return;
+
+    updatePresetBadges();
+
+    const n = selectedPlayers.length;
+    if (n < 4) {
+        infoEl.textContent = `Select at least 4 players (${n} selected)`;
+        generateBtn.disabled = true;
+        return;
+    }
+
+    const hours = parseFloat(hoursEl?.value) || 2;
+    const numCourts = Math.max(1, Math.floor(n / 4));
+    const rounds = Math.max(1, Math.floor(hours * 60 / 13));
+    const totalGames = rounds * numCourts;
+    const sitters = n - numCourts * 4;
+
+    infoEl.textContent = `${numCourts} court${numCourts > 1 ? 's' : ''} · ${totalGames} games · ${sitters > 0 ? sitters + ' sitting out per round' : 'all playing each round'}`;
+    generateBtn.disabled = false;
+}
+
+async function generatePresetSchedule() {
+    const players = [...selectedPlayers];
+    const hours = parseFloat(qs('#preset-hours')?.value) || 2;
+
+    if (players.length < 4) { toast('Select at least 4 players'); return; }
+
+    const btn = qs('#btn-generate-preset');
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+
+    try {
+        const seedMatches = presetSchedule.map(g => ({ team1: g.team1, team2: g.team2 }));
+        const resp = await fetch('/badminton/api/preset/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ players, hours, seed_matches: seedMatches, seed_num_courts: presetNumCourts }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            toast(err.error || 'Failed to generate schedule');
+            return;
+        }
+        const data = await resp.json();
+        presetNumCourts = data.num_courts || 1;
+        presetSchedule = data.schedule.map(g => ({
+            ...g,
+            match_id: null,
+            winner: null,
+            team1_score: null,
+            team2_score: null,
+        }));
+        savePresetSchedule();
+        renderPresetTable();
+        updatePresetStats();
+        const schedEl = qs('#preset-schedule-container');
+        if (schedEl) schedEl.style.display = 'block';
+    } catch (e) {
+        toast('Network error generating schedule');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Generate Schedule'; }
+    }
+}
+
+async function addPresetRound() {
+    if (!presetSchedule.length) { toast('Generate a schedule first'); return; }
+
+    const players = [...selectedPlayers];
+    if (players.length < 4) { toast('Select at least 4 players'); return; }
+
+    const btn = qs('#btn-add-round');
+    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+
+    try {
+        const seedMatches = presetSchedule.map(g => ({ team1: g.team1, team2: g.team2 }));
+        const resp = await fetch('/badminton/api/preset/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                players,
+                hours: 1,
+                seed_matches: seedMatches,
+                seed_num_courts: presetNumCourts,
+                max_rounds: 1,
+            }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            toast(err.error || 'Failed to add round');
+            return;
+        }
+        const data = await resp.json();
+        const gameNumOffset = presetSchedule.length > 0
+            ? Math.max(...presetSchedule.map(g => g.game_num))
+            : 0;
+        const newGames = data.schedule.map(g => ({
+            ...g,
+            game_num: g.game_num + gameNumOffset,
+            match_id: null,
+            winner: null,
+            team1_score: null,
+            team2_score: null,
+        }));
+        presetSchedule.push(...newGames);
+        savePresetSchedule();
+        renderPresetTable();
+        updatePresetStats();
+    } catch (e) {
+        toast('Network error adding round');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '+ Add Round'; }
+    }
+}
+
+function renderPresetTable() {
+    const wrap = qs('#preset-schedule-table-wrap');
+    if (!wrap) return;
+
+    if (!presetSchedule.length) {
+        wrap.innerHTML = '<p class="table-empty">No schedule generated yet.</p>';
+        return;
+    }
+
+    // Group schedule into rounds of presetNumCourts concurrent games
+    const rounds = [];
+    for (let i = 0; i < presetSchedule.length; i += presetNumCourts) {
+        rounds.push(presetSchedule.slice(i, i + presetNumCourts).map((g, j) => ({ ...g, idx: i + j })));
+    }
+
+    const roundsHtml = rounds.map((round) => {
+        const cardsHtml = round.map((g) => {
+            const isDone = !!g.match_id;
+            const winnerA = g.winner === 'team1';
+            const winnerB = g.winner === 'team2';
+            const score1Val = g.team1_score !== null && g.team1_score !== undefined ? g.team1_score : '';
+            const score2Val = g.team2_score !== null && g.team2_score !== undefined ? g.team2_score : '';
+
+            return `<div class="preset-match-card${isDone ? ' submitted' : ''}" data-idx="${g.idx}">
+  <div class="preset-court-row">
+    <span class="preset-match-num">#${g.game_num}</span>
+    <div class="preset-team preset-team-a${winnerA ? ' winner' : ''}" data-idx="${g.idx}" data-side="a">
+      <span class="preset-team-names">${escapeHtml(g.team1.join(' & '))}</span>
+      <input type="number" class="preset-score-input" data-idx="${g.idx}" data-side="a" min="0" placeholder="0" value="${score1Val}">
+    </div>
+    <div class="preset-vs">VS</div>
+    <div class="preset-team preset-team-b${winnerB ? ' winner' : ''}" data-idx="${g.idx}" data-side="b">
+      <input type="number" class="preset-score-input" data-idx="${g.idx}" data-side="b" min="0" placeholder="0" value="${score2Val}">
+      <span class="preset-team-names">${escapeHtml(g.team2.join(' & '))}</span>
+    </div>
+    <button type="button" class="btn-preset-submit${isDone ? ' done' : ''}" data-idx="${g.idx}"${!g.winner ? ' disabled' : ''}>${isDone ? '✓' : 'Submit'}</button>
+  </div>
+</div>`;
+        }).join('');
+
+        const sitStr = round[0].sitters.length ? round[0].sitters.join(', ') : '—';
+        const sitoutHtml = `<div class="preset-sitout-row">
+  <span class="preset-sitout-label">Out</span>
+  <span class="preset-sitout-names">${escapeHtml(sitStr)}</span>
+</div>`;
+
+        return `<div class="preset-round">${cardsHtml}${sitoutHtml}</div>`;
+    }).join('');
+
+    wrap.innerHTML = `<div class="preset-schedule-wrap">${roundsHtml}</div>
+<button type="button" id="btn-add-round" class="btn btn-secondary" style="width:100%; margin-top:0.6rem;">+ Add Round</button>`;
+
+    // Score inputs — auto-determine winner from scores
+    wrap.querySelectorAll('.preset-score-input').forEach(input => {
+        input.addEventListener('input', () => {
+            const idx = parseInt(input.dataset.idx);
+            const side = input.dataset.side;
+            const val = input.value === '' ? null : parseInt(input.value);
+            if (side === 'a') {
+                presetSchedule[idx].team1_score = isNaN(val) ? null : val;
+            } else {
+                presetSchedule[idx].team2_score = isNaN(val) ? null : val;
+            }
+
+            const g = presetSchedule[idx];
+            const card = wrap.querySelector(`.preset-match-card[data-idx="${idx}"]`);
+            if (card) {
+                const teamA = card.querySelector('.preset-team[data-side="a"]');
+                const teamB = card.querySelector('.preset-team[data-side="b"]');
+                const submitBtn = card.querySelector('.btn-preset-submit');
+                const bothSet = g.team1_score !== null && g.team2_score !== null;
+                const notTied = bothSet && g.team1_score !== g.team2_score;
+
+                if (notTied) {
+                    const aWins = g.team1_score > g.team2_score;
+                    g.winner = aWins ? 'team1' : 'team2';
+                    teamA?.classList.toggle('winner', aWins);
+                    teamB?.classList.toggle('winner', !aWins);
+                    if (submitBtn) submitBtn.disabled = false;
+                } else {
+                    g.winner = null;
+                    teamA?.classList.remove('winner');
+                    teamB?.classList.remove('winner');
+                    if (submitBtn) submitBtn.disabled = true;
+                }
+            }
+            savePresetSchedule();
+        });
+    });
+
+    // Submit buttons
+    wrap.querySelectorAll('.btn-preset-submit').forEach(btn => {
+        btn.addEventListener('click', () => submitPresetGame(parseInt(btn.dataset.idx)));
+    });
+
+    // Add round button (rendered inside wrap, re-wired on each render)
+    wrap.querySelector('#btn-add-round')?.addEventListener('click', addPresetRound);
+}
+
+async function submitPresetGame(idx) {
+    const g = presetSchedule[idx];
+    if (!g.winner) { toast('Enter scores to determine winner'); return; }
+
+    const team1Score = g.team1_score !== null && g.team1_score !== undefined ? g.team1_score : 0;
+    const team2Score = g.team2_score !== null && g.team2_score !== undefined ? g.team2_score : 0;
+
+    let gameValue;
+    if (presetBetMode === 'dynamic') {
+        const loserScore = g.winner === 'team1' ? team2Score : team1Score;
+        if (loserScore < 10) gameValue = 3;
+        else if (loserScore < 14) gameValue = 2;
+        else gameValue = 1;
+    } else {
+        gameValue = presetStaticBet;
+    }
+
+    const payload = {
+        team1: g.team1,
+        team2: g.team2,
+        team1_score: team1Score,
+        team2_score: team2Score,
+        game_value: gameValue,
+        player_no_bet_status: {},
+    };
+
+    const submitBtn = qs(`.btn-preset-submit[data-idx="${idx}"]`);
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '…'; }
+
+    try {
+        let resp;
+        if (g.match_id) {
+            resp = await fetch(`/badminton/api/matches/${g.match_id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    team1_score: team1Score,
+                    team2_score: team2Score,
+                }),
+            });
+        } else {
+            resp = await fetch('/badminton/api/matches', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+        }
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            toast(err.error || 'Failed to submit match');
+            return;
+        }
+
+        const saved = await resp.json();
+        presetSchedule[idx].match_id = saved.match_id || g.match_id;
+
+        // Refresh match history and earnings in the sidebar
+        try {
+            await loadMatchHistory();
+            await loadSessionStats();
+            await loadPlayerEarnings();
+        } catch (_) {}
+
+        // Update this card visually
+        const card = qs(`.preset-match-card[data-idx="${idx}"]`);
+        if (card) {
+            card.classList.add('submitted');
+            if (submitBtn) { submitBtn.classList.add('done'); submitBtn.textContent = '✓'; submitBtn.disabled = false; }
+        }
+
+        savePresetSchedule();
+        updatePresetStats();
+        toast(g.match_id ? 'Match updated' : 'Match recorded');
+    } catch (e) {
+        toast('Network error submitting match');
+    } finally {
+        if (submitBtn && !presetSchedule[idx].match_id) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit';
+        }
+    }
+}
+
+function updatePresetStats() {
+    const el = qs('#preset-stats');
+    if (!el || !presetSchedule.length) { if (el) el.innerHTML = ''; return; }
+
+    const playerGames = {};
+    const playerSitouts = {};
+    presetSchedule.forEach((g, i) => {
+        [...g.team1, ...g.team2].forEach(p => {
+            playerGames[p] = (playerGames[p] || 0) + 1;
+        });
+        // Only count sit-outs from the first court of each round to avoid
+        // double-counting (all courts in a round share the same sitters list)
+        if (i % presetNumCourts === 0) {
+            g.sitters.forEach(p => {
+                playerSitouts[p] = (playerSitouts[p] || 0) + 1;
+            });
+        }
+    });
+
+    const submitted = presetSchedule.filter(g => g.match_id).length;
+    const total = presetSchedule.length;
+
+    const playerRows = Object.keys(playerGames).sort().map(p => {
+        const games = playerGames[p] || 0;
+        const sits = playerSitouts[p] || 0;
+        return `<tr><td>${escapeHtml(p)}</td><td>${games}</td><td>${sits}</td></tr>`;
+    }).join('');
+
+    el.innerHTML = `
+<div class="preset-stats-summary">
+  <div class="preset-stat"><span class="preset-stat-label">Total Games</span><span class="preset-stat-value">${total}</span></div>
+  <div class="preset-stat"><span class="preset-stat-label">Submitted</span><span class="preset-stat-value">${submitted}</span></div>
+  <div class="preset-stat"><span class="preset-stat-label">Remaining</span><span class="preset-stat-value">${total - submitted}</span></div>
+</div>
+<table class="preset-player-table">
+  <thead><tr><th>Player</th><th>Games</th><th>Sit-outs</th></tr></thead>
+  <tbody>${playerRows}</tbody>
+</table>`;
+}
+
+function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}

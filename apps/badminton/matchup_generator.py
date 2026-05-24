@@ -48,85 +48,81 @@ class MatchupGenerator:
         return tuple(sorted([player1, player2]))
     
     def _score_matchup(self, team1: Tuple[str, str], team2: Tuple[str, str],
-                        all_playing: Optional[Set[str]] = None) -> float:
+                        all_playing: Optional[Set[str]] = None,
+                        include_sitout: bool = True) -> float:
         """
         Score a potential matchup based on how balanced it is.
         Lower scores are better.
 
-        Priority order (enforced by weight multipliers):
-        1. Equal playing time - strongly prefers players who sat out recently
-        2. Partnership variety - prefers new partner combinations
-        3. Opponent variety - minor tie-breaker for otherwise equal matchups
-
         Args:
-            team1: Tuple of two player names for team 1
-            team2: Tuple of two player names for team 2
-            all_playing: Optional set of ALL players playing across ALL courts in this
-                         scenario. When provided, sit-outs are computed relative to
-                         all_playing rather than just this court's four players. This
-                         is required for correct multi-court scenario scoring so that
-                         players on Court 2 are not counted as sit-outs when scoring
-                         Court 1.
+            team1: Players on team 1.
+            team2: Players on team 2.
+            all_playing: Full set playing across ALL courts. When provided, sit-outs
+                         are computed against this set (not just the 4 on this court).
+            include_sitout: Set False when sit-out penalty is being computed once
+                            at the round level (multi-court) to avoid double-counting.
         """
         p1, p2 = team1
         p3, p4 = team2
         playing_players = {p1, p2, p3, p4}
-        # Use global playing set when available (multi-court scenario scoring)
         effective_playing = all_playing if all_playing is not None else playing_players
-        sitting_players = set(self.players) - effective_playing
-        
-        # Count how many times these partnerships have occurred
+
         partnership_score = (
             self.partnership_count[self._get_pair_key(p1, p2)] +
             self.partnership_count[self._get_pair_key(p3, p4)]
         )
-        
-        # Count how many times these players have faced each other
+
         opponent_score = (
             self.opponent_count[self._get_pair_key(p1, p3)] +
             self.opponent_count[self._get_pair_key(p1, p4)] +
             self.opponent_count[self._get_pair_key(p2, p3)] +
             self.opponent_count[self._get_pair_key(p2, p4)]
         )
-        
-        # Calculate sit-out penalty: heavily penalize players sitting out multiple times
+
         sitout_score = 0
-        for player in sitting_players:
-            sitout_count = self.sitout_count[player]
-            # Exponential penalty: sitting out once is okay, but multiple times is heavily penalized
-            if sitout_count == 0:
-                sitout_score += 0  # No penalty for first sit-out
-            elif sitout_count == 1:
-                sitout_score += 10  # Heavy penalty for second sit-out
-            else:
-                sitout_score += 50 * (sitout_count - 1)  # Exponentially increasing penalty
-        
-        # Combine scores using weights to enforce priority order:
-        # SITOUT_WEIGHT >> PARTNERSHIP_WEIGHT >> OPPONENT_WEIGHT
-        return (sitout_score * SITOUT_WEIGHT + 
-                partnership_score * PARTNERSHIP_WEIGHT + 
+        if include_sitout:
+            for player in set(self.players) - effective_playing:
+                sitout_count = self.sitout_count[player]
+                if sitout_count == 1:
+                    sitout_score += 10
+                elif sitout_count > 1:
+                    sitout_score += 50 * (sitout_count - 1)
+
+        return (sitout_score * SITOUT_WEIGHT +
+                partnership_score * PARTNERSHIP_WEIGHT +
                 opponent_score * OPPONENT_WEIGHT)
     
-    def _update_history(self, team1: Tuple[str, str], team2: Tuple[str, str]):
-        """Update partnership, opponent, and sit-out history after a match."""
+    def _update_history(self, team1: Tuple[str, str], team2: Tuple[str, str],
+                        all_playing: Optional[Set[str]] = None,
+                        update_sitouts: bool = True):
+        """Update partnership, opponent, and sit-out history after a match.
+
+        Args:
+            team1: Players on team 1 of this court.
+            team2: Players on team 2 of this court.
+            all_playing: Full set of players active across ALL courts this round.
+                         When provided, sit-outs are computed against this set so
+                         players on other courts are not wrongly counted as sitters.
+            update_sitouts: Set False on subsequent courts in a multi-court round so
+                            sit-outs are only counted once per round (on the first call).
+        """
         p1, p2 = team1
         p3, p4 = team2
-        playing_players = {p1, p2, p3, p4}
-        sitting_players = set(self.players) - playing_players
-        
+
         # Update partnerships
         self.partnership_count[self._get_pair_key(p1, p2)] += 1
         self.partnership_count[self._get_pair_key(p3, p4)] += 1
-        
+
         # Update opponents
         self.opponent_count[self._get_pair_key(p1, p3)] += 1
         self.opponent_count[self._get_pair_key(p1, p4)] += 1
         self.opponent_count[self._get_pair_key(p2, p3)] += 1
         self.opponent_count[self._get_pair_key(p2, p4)] += 1
-        
-        # Update sit-out counts for players not in this match
-        for player in sitting_players:
-            self.sitout_count[player] += 1
+
+        if update_sitouts:
+            effective_playing = all_playing if all_playing is not None else {p1, p2, p3, p4}
+            for player in set(self.players) - effective_playing:
+                self.sitout_count[player] += 1
     
     def generate_matchup(self) -> Tuple[Tuple[str, str], Tuple[str, str]]:
         """
@@ -276,11 +272,21 @@ class MatchupGenerator:
         `courts_left` courts (4 players per court, 2v2).
         """
         if courts_left == 0:
-            score = sum(
-                self._score_matchup(t1, t2, all_playing=all_playing)
+            # Sit-out penalty computed once for the whole round, not per court
+            sitout_score = 0
+            for player in set(self.players) - all_playing:
+                c = self.sitout_count[player]
+                if c == 1:
+                    sitout_score += 10
+                elif c > 1:
+                    sitout_score += 50 * (c - 1)
+
+            # Per-court: partnership + opponent variety only (no sit-out)
+            court_score = sum(
+                self._score_matchup(t1, t2, all_playing=all_playing, include_sitout=False)
                 for t1, t2 in current
             )
-            results.append((score, list(current)))
+            results.append((sitout_score * SITOUT_WEIGHT + court_score, list(current)))
             return
 
         for team1 in itertools.combinations(remaining, 2):

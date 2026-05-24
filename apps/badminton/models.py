@@ -202,13 +202,22 @@ class Match(Base):
     def is_player_in_match(self, user_id):
         """Check if a user was in this match"""
         return user_id in self.get_player_ids()
-    
+
     def did_player_win(self, user_id):
         """Check if a player won this match"""
         if not self.is_player_in_match(user_id):
             return False
-        
+
         if self.winner_team == 1:
             return user_id in [self.team1_player1_id, self.team1_player2_id]
         else:
             return user_id in [self.team2_player1_id, self.team2_player2_id]
+
+
+class PresetState(Base):
+    """Stores the active preset schedule so all devices share the same state."""
+    __tablename__ = 'preset_state'
+
+    id = Column(Integer, primary_key=True)  # Always row id=1 (single-row table)
+    state_json = Column(JSON, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=_now_pacific, onupdate=_now_pacific)

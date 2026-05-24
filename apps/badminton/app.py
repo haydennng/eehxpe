@@ -24,7 +24,7 @@ from pathlib import Path
 
 # Import database and auth modules
 from database import init_db, session_scope
-from models import User, UserRole, Match
+from models import User, UserRole, Match, PresetState
 from auth import authenticate_user, create_user, get_user_by_id, get_user_by_username, change_password, admin_required
 from player_stats import get_player_stats, get_leaderboard
 from matchup_generator import MatchupGenerator
@@ -1041,6 +1041,142 @@ def get_scenarios():
 
     scenarios = _build_scenarios(num_courts)
     return jsonify({'scenarios': scenarios})
+
+
+@app.route('/api/preset/generate', methods=['POST'])
+@login_required
+def generate_preset_schedule():
+    """Generate a full pre-planned schedule for preset mode."""
+    data = request.json or {}
+    players = data.get('players', [])
+
+    try:
+        hours = float(data.get('hours', 1.0))
+        points_to = int(data.get('points_to', 21))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid hours or points_to'}), 400
+
+    if len(players) < 4:
+        return jsonify({'error': 'At least 4 players required'}), 400
+    if hours <= 0 or hours > 24:
+        return jsonify({'error': 'Hours must be between 0 and 24'}), 400
+    if points_to < 1:
+        return jsonify({'error': 'Points must be at least 1'}), 400
+
+    seed_matches = data.get('seed_matches', [])
+    seed_num_courts = max(1, int(data.get('seed_num_courts', 1)))
+
+    max_rounds = data.get('max_rounds', None)
+
+    num_courts = max(1, len(players) // 4)
+    AVG_GAME_MINUTES = 13
+    rounds = max(1, int(hours * 60 / AVG_GAME_MINUTES))
+    if max_rounds is not None:
+        rounds = max(1, int(max_rounds))
+    # With n courts each round plays n games simultaneously, so total = rounds * courts
+    total_games = rounds * num_courts
+
+    gen = MatchupGenerator(players)
+    if seed_matches:
+        # Group seed matches into rounds so sit-outs are counted correctly:
+        # only players absent from ALL courts in a round are real sitters.
+        for i in range(0, len(seed_matches), seed_num_courts):
+            round_group = seed_matches[i:i + seed_num_courts]
+            all_playing_in_round = set()
+            for m in round_group:
+                all_playing_in_round.update(m['team1'])
+                all_playing_in_round.update(m['team2'])
+            for court_idx, m in enumerate(round_group):
+                gen._update_history(
+                    tuple(m['team1']), tuple(m['team2']),
+                    all_playing=all_playing_in_round,
+                    update_sitouts=(court_idx == 0),
+                )
+    schedule = []
+
+    if num_courts == 1:
+        for i in range(rounds):
+            matchup = gen.generate_matchup()
+            if not matchup:
+                break
+            team1, team2 = matchup
+            sitters = [p for p in players if p not in team1 and p not in team2]
+            schedule.append({
+                'game_num': i + 1,
+                'team1': list(team1),
+                'team2': list(team2),
+                'sitters': sitters,
+            })
+    else:
+        game_num = 1
+        for _ in range(rounds):
+            scenarios = gen.generate_paired_scenarios(num_courts, n_scenarios=1)
+            if not scenarios:
+                break
+            round_matchups = scenarios[0]
+            all_playing = set()
+            for m in round_matchups:
+                all_playing.update(m['team1'])
+                all_playing.update(m['team2'])
+            sitters = [p for p in players if p not in all_playing]
+            for court_idx, m in enumerate(round_matchups):
+                # Sit-outs counted once per round on the first court, using the
+                # full all_playing set so players on other courts aren't flagged.
+                gen._update_history(
+                    tuple(m['team1']), tuple(m['team2']),
+                    all_playing=all_playing,
+                    update_sitouts=(court_idx == 0),
+                )
+                schedule.append({
+                    'game_num': game_num,
+                    'team1': m['team1'],
+                    'team2': m['team2'],
+                    'sitters': sitters,
+                })
+                game_num += 1
+
+    return jsonify({
+        'schedule': schedule,
+        'total_games': len(schedule),
+        'num_courts': num_courts,
+        'points_to': points_to,
+    })
+
+
+@app.route('/api/preset/state', methods=['GET'])
+@login_required
+def get_preset_state():
+    """Return the shared preset schedule state."""
+    with session_scope() as session:
+        row = session.query(PresetState).filter_by(id=1).first()
+        if row and row.state_json:
+            return jsonify({'state': row.state_json})
+        return jsonify({'state': None})
+
+
+@app.route('/api/preset/state', methods=['PUT'])
+@login_required
+def save_preset_state():
+    """Save (upsert) the shared preset schedule state."""
+    data = request.json or {}
+    state = data.get('state')
+    with session_scope() as session:
+        row = session.query(PresetState).filter_by(id=1).first()
+        if row:
+            row.state_json = state
+            row.updated_at = _now_pacific()
+        else:
+            session.add(PresetState(id=1, state_json=state))
+    return jsonify({'ok': True})
+
+
+@app.route('/api/preset/state', methods=['DELETE'])
+@login_required
+def clear_preset_state():
+    """Clear the shared preset schedule state."""
+    with session_scope() as session:
+        session.query(PresetState).filter_by(id=1).delete()
+    return jsonify({'ok': True})
 
 
 @app.route('/api/matches', methods=['POST'])
